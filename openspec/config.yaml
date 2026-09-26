@@ -1,0 +1,55 @@
+schema: spec-driven
+
+context: |
+  Language: English
+  All artifacts must be written in English.
+  Keep OpenSpec structural headings and SHALL/MUST keywords in English.
+
+  cbh-parser is a Rust library and CLI that reads ChessBase databases — the
+  classic .cbh family (.cbh .cbg .cba .cbp .cbt .cbc .cbs .cbj .cbe .cbl and
+  boosters .cit/.cib/.cbb/.cbgi) and the 2CBH family (.2cbh .2cbg .2cba .2lid
+  .2lgd .2lcd) — plus the .cbv/.cbz archive containers. It is MIT licensed and
+  built for maximum performance: zero-allocation parsing, gigachess as the
+  only chess core (16-bit moves2 move currency, incremental Polyglot Zobrist,
+  bitboard movegen), streaming-friendly access, and benchmarked throughput.
+
+  Portions are derived from oschess-cb-bridge's cbformat (MIT, Copyright (c)
+  2026 the oschess-cb-bridge contributors) with attribution; the chess layer is
+  re-based on gigachess (BlindBase's MIT chess core, ADR-013/015). Format facts
+  also reference Yarin's morphy specifications (unlicensed: facts only, never
+  copy text or code) and scidb/libcbh/uncbv/Source2Metal (GPL: test oracles
+  only, never linked or copied).
+
+  This library is the BYOD foundation for BlindBase (read-only reference
+  databases and conversion to .bbdb). See AGENTS.md for the project
+  constitution.
+githubCopilot:
+  cloudAgent: false
+
+rules:
+  proposal:
+    - Keep proposals focused on a single deliverable with clear non-goals
+    - Record licensing and provenance implications for every reused work
+    - Reference benchmark expectations for any performance claim
+  specs:
+    - Use MUST/SHALL requirements with Given/When/Then scenarios
+    - Cover malformed and damaged databases explicitly
+    - State byte-level format facts only where verified, and note the source
+  design:
+    - Name every module's provenance (ported / clean-room / original)
+    - Include performance budgets and the benchmark method
+    - Keep gigachess as the single chess core; never add a second chess implementation
+  tasks:
+    - Each task is completable in one coding session with verification steps
+    - Real databases stay local; public CI uses generated fixtures
+    - Include a final verification task (fmt, clippy, tests, benchmarks)
+
+operations:
+  apply:
+    guidance:
+      - Prefix git commit messages with the change ID in brackets, e.g. "[bootstrap-cbh-parser] Add cbh index reader"
+      - Never copy text or code from unlicensed or GPL sources; update the provenance ledger when adding a module
+      - Run cargo fmt, cargo clippy and cargo test before marking tasks complete
+  archive:
+    guidance:
+      - Summarize benchmark results and provenance ledger updates in the archive notes

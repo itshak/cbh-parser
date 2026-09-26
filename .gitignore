@@ -1,0 +1,30 @@
+# Rust
+/target
+**/*.rs.bk
+
+# macOS
+.DS_Store
+
+# Local test material: real databases are never committed
+/fixtures-local/
+*.cbh
+*.cbg
+*.cba
+*.cbp
+*.cbt
+*.cbc
+*.cbs
+*.cbj
+*.cbe
+*.cbl
+*.cbv
+*.cbz
+*.2cbh
+*.2cbg
+*.2cba
+*.2lid
+*.2lgd
+*.2lcd
+
+# Generated fixtures may be committed under their pytest-style directory
+!/tests/fixtures/generated/**

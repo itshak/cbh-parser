@@ -1,0 +1,6 @@
+# Keep local and CI toolchains on current stable.
+# Edition 2024 and the ported cbformat code need Rust 1.88+;
+# current stable (1.98+) is recommended.
+[toolchain]
+channel = "stable"
+components = ["rustfmt", "clippy"]
