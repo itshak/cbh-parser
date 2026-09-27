@@ -50,6 +50,7 @@ State: `planned` until the porting task lands; then `ported`/`ported (chess swap
 | Ours | Upstream | Regime | State |
 |---|---|---|---|
 | `cbh-format` — `file`, `codepage` | `file.rs`, `codepage.rs` | port | planned (2.4) |
+| `cbh-format` — `tables` (move-mode byte tables) | `cbh/tables.rs` | port (raw format data; MIT `asdfjkl/cbh2pgn` credit kept) | **ported** (0.6) |
 | `cbh-format` — `cbh::{bytes, tables, record, entities, annotations, text, wide, window}` | `cbh/{bytes,tables,record,entities,annotations,text,wide,window}.rs` | port | planned (2.1–2.3) |
 | `cbh-format` — `cbh::moves` (record split, start decode) | `cbh/moves.rs` | port + chess swap (start board via `gigachess`) | planned (2.1, 3.3) |
 | `cbh-format` — `v2::{bytes, record, frame, entities, moves, window, annotations}` | `v2/**` | port | planned (2.1–2.3) |
@@ -58,7 +59,7 @@ State: `planned` until the porting task lands; then `ported`/`ported (chess swap
 | `cbh-chess` — `decode`, `pieces`, `replay` | `cbh/{decode,pieces}.rs`, `replay/**` | port + chess swap (`moves2`, `gigachess` legality, king→rook castling, Polyglot keys) | planned (3.2–3.4) |
 | `cbh-parser` — `view` | `view.rs` | port | planned (6.1) |
 | `cbh-parser` — `pgn::{san, tree, commands, comments, classic, mod}` | `pgn/**` | port + chess swap (SAN via `gigachess` at the boundary) | planned (3.5, 4.2) |
-| `cbh-fixtures` — classic writer | `fixture_cbh.rs`, `fixture_cbh/builder.rs` | port + chess swap | planned (0.6) |
+| `cbh-fixtures` — classic writer | `fixture_cbh.rs`, `fixture_cbh/builder.rs` | port + chess swap | **ported (0.6)**; 2CBH writer (`fixture.rs`) pending Phase 2 |
 | `cbh-fixtures` — 2CBH writer | `fixture.rs` | port + chess swap | planned (0.6) |
 
 ### Facts-only records
@@ -85,11 +86,13 @@ State: `planned` until the porting task lands; then `ported`/`ported (chess swap
 
 | Ours | Notes |
 |---|---|
+| Workspace layout, `rustfmt.toml`, shared lints (`Cargo.toml`) | Original; conventions adapted from the ancestor (max width 120, small heuristics Max); nothing copied |
+| `cbh-format::error` — typed `Error`/`Result`/`Role` | Original (task 1.2); no panics on damaged input |
 | `cbh-format` — archive reader (`.cbv`, `.cbz`) | Clean-room per the protocol above; facts in `docs/research/00-cbv-facts.md` |
-| `cbh-format`/`cbh-parser` — typed error model | Task 1.2 |
 | `cbh-parser` — `Database`, `GameIter`, `decode_game_into`, archive façade | Task 6.1, 5.3 |
 | `cbh-cli` — `info`, `verify`, `pgn`, `games`, `archive` | Task 5.3, 6.4 |
 | `cbh-chess` — gigachess bridge helpers (start boards, key alignment) | Task 3.3 |
 | `scripts/oracles/**`, `scripts/fetch-ancestor.sh`, benchmark harness | Tasks 0.4, 0.7, 6.2 |
+| CI workflow, including the one-chess-core guard | Task 1.3 |
 | `docs/**`, `SPEC.md`, fixtures builder glue | Tasks 0.5, 0.6 |
 

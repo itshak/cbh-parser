@@ -24,6 +24,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "cbh-fixtures"
+version = "0.1.0"
+dependencies = [
+ "cbh-format",
+ "gigachess",
+]
+
+[[package]]
 name = "cbh-format"
 version = "0.1.0"
 

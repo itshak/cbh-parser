@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  build-and-test:
+    name: fmt, clippy, test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        run: rustup toolchain install stable --profile minimal --component rustfmt,clippy
+      - name: Formatting
+        run: cargo fmt --check
+      - name: Lints
+        run: cargo clippy --all-targets -- -D warnings
+      - name: Tests
+        run: cargo test
+
+  one-chess-core:
+    name: no chesscore / shakmaty
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fail on a second chess implementation
+        run: |
+          # gigachess is the only chess core in this tree. `chesscore` and
+          # `shakmaty` may be named in docs (provenance), never in code or manifests.
+          # `vendor/` is the git-ignored ancestor snapshot and never exists in CI.
+          bad_uses=$(grep -RnE '^[[:space:]]*(pub[[:space:]]+)?use[[:space:]].*\b(chesscore|shakmaty)\b' --include='*.rs' crates/ || true)
+          bad_deps=$(grep -RnE '\b(chesscore|shakmaty)\b' --include='Cargo.toml' --exclude-dir=vendor --exclude-dir=target . || true)
+          if [ -n "$bad_uses$bad_deps" ]; then
+            echo "found a second chess implementation:"; echo "$bad_uses"; echo "$bad_deps"; exit 1
+          fi
+          echo "only gigachess is used"

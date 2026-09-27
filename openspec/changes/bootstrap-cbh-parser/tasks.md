@@ -7,16 +7,16 @@
 - [x] 0.3 Collect `.cbv`/`.cbz` facts into `docs/research/00-cbv-facts.md` from file inspection and `uncbv` outputs only (no source reading), against the local archive (`CBH_TEST_CBV` = `Mega Database 2025/Mega Database 2025.cbv`, 1,739,924,298 B; header magic `08 00 1F 0F AD 00 03 00`; first member `Mega Database 2025.cbh`). Verify: facts list (magic, member table, block flags, Huffman mode, DES-CBZ key derivation) with evidence notes; the member list covers `.cbh .cbg .cbj .cba .cbp .cbt .cbc .cbs .cbe .cbl .cbm .cbtt .cko .cpo .flags .ico .ini` plus the `.bmp`/`.html` assets.
 - [x] 0.4 Run the upstream baseline on the real database (`CBH_TEST_DB` = `Mega Database 2025/Mega Database 2025`, base name; local-only): game count (expect 11,151,119 `.cbh` records = `(512,951,520 − 46) / 46`), open time, sequential decode games/s, PGN export, memory → `benchmarks/baseline.json` + `docs/research/01-real-database-report.md` (asset validation facts seeded 2026-09-27). Verify: numbers reproducible on the same machine.
 - [x] 0.5 Write `SPEC.md` (our words, per-fact source notes) covering headers, moves, annotations, namebases and containers; enumerate every unknown explicitly. Verify: each section cites a source; unknowns listed.
-- [ ] 0.6 Implement the fixture builder (test-only byte writer) generating: standard game, variations, annotations, promotions/castling/EP, non-standard FEN, Chess960, guiding text, deleted game, truncated files. Verify: fixtures load in at least one oracle tool.
-- [ ] 0.7 Build `scripts/oracles/` runners (scidb `cbh2si4`, `asdfjkl cbh2pgn`, `uncbv`; optional `morphy`) gated by `CBH_ORACLE=1`. Verify: a runner diff completes on a generated fixture.
+- [x] 0.6 Implement the fixture builder (test-only byte writer) generating: standard game, variations, annotations, promotions/castling/EP, non-standard FEN, Chess960, guiding text, deleted game, truncated files. Verify: fixtures load in at least one oracle tool.
+- [x] 0.7 Build `scripts/oracles/` runners (scidb `cbh2si4`, `asdfjkl cbh2pgn`, `uncbv`; optional `morphy`) gated by `CBH_ORACLE=1`. Verify: a runner diff completes on a generated fixture.
 - [x] 0.8 Record the local test-asset inventory in `docs/research/01-real-database-report.md`: the classic Mega 2025 set (`.cbh` 512,951,520 B, `.cbg` 1,253,435,766 B, `.cbj` 1,338,134,312 B), the `.cbv` archive, the 2CBH sets (`CBH_TEST_DB_2CBH` = `~/Documents/ChessBase/Download/MyPGNDownloads.2cbh`; `MyWork/AutoSave.2cbh`; `Books/Personalities/*.2cbh`) and the classic/2CBH dual-format pairs in `~/Documents/ChessBase/History/Year_2026/**`. Verify: every asset lists path, size, generation and the phase that reads it; no absolute path is hardcoded in committed test code (env-gated only).
 
 ## Phase 1 — Workspace skeleton
 
 - [x] 1.1 Create the Cargo workspace (`cbh-format`, `cbh-chess`, `cbh-parser`, `cbh-cli`), edition 2024, shared lints. Verify: `cargo build` passes.
 - [ ] 1.2 Error model: typed errors (`Corrupt`, `MissingFile`, `Truncated`, `WrongPassword`, …) carrying file/offset context; no panics. Verify: unit tests for every variant.
-- [ ] 1.3 CI: `cargo fmt --check`, `clippy -D warnings`, tests, plus a job that greps for `chesscore`/`shakmaty` usage and fails. Verify: workflow green on the skeleton.
-- [ ] 1.4 Seed `docs/provenance.md` with the workspace and error model entries; cross-check `THIRD_PARTY_NOTICES.md`. Verify: entries present.
+- [x] 1.3 CI: `cargo fmt --check`, `clippy -D warnings`, tests, plus a job that greps for `chesscore`/`shakmaty` usage and fails. Verify: workflow green on the skeleton.
+- [x] 1.4 Seed `docs/provenance.md` with the workspace and error model entries; cross-check `THIRD_PARTY_NOTICES.md`. Verify: entries present.
 
 ## Phase 2 — Index and metadata
 

@@ -8,5 +8,6 @@
 //! Ported from `cbformat` in `oschess-cb-bridge` (MIT); see `docs/provenance.md`.
 
 pub mod error;
+pub mod tables;
 
 pub use error::{Error, Result, Role};
