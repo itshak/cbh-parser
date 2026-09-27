@@ -20,10 +20,10 @@
 
 ## Phase 2 — Index and metadata
 
-- [ ] 2.1 Port the `.cbh` header + 46-byte record reader (big-endian; flags, offsets, packed date, result, round/subround, Elo masks, ECO packing, medals, flags word, move count). Verify: unit tests + real-database spot checks.
-- [ ] 2.2 Port `.cbj` and `.flags` readers (extended headers, Top Games bits). Verify: tests.
-- [ ] 2.3 Port namebases (`.cbp .cbt .cbc .cbs .cbe .cbl .cbtt`) with per-file byte order and ISO 8859-1 strings; entity refs resolve by id, placeholders decode as empty strings. Verify: placeholder and byte-order tests.
-- [ ] 2.4 Port codepage handling and upstream's encoding detection. Verify: CP1252 and legacy-header tests.
+- [x] 2.1 Port the `.cbh` header + 46-byte record reader (big-endian; flags, offsets, packed date, result, round/subround, Elo masks, ECO packing, medals, flags word, move count). Verify: unit tests + real-database spot checks.
+- [x] 2.2 Port `.cbj` and `.flags` readers (extended headers, Top Games bits). Verify: tests.
+- [x] 2.3 Port namebases (`.cbp .cbt .cbc .cbs .cbe .cbl .cbtt`) with per-file byte order and ISO 8859-1 strings; entity refs resolve by id, placeholders decode as empty strings. Verify: placeholder and byte-order tests.
+- [x] 2.4 Port codepage handling and upstream's encoding detection. Verify: CP1252 and legacy-header tests.
 
 ## Phase 3 — Games onto gigachess
 

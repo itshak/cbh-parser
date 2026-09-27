@@ -14,6 +14,7 @@ gigachess = "0.1.2"
 cbh-format = { version = "0.1.0", path = "crates/cbh-format" }
 cbh-chess = { version = "0.1.0", path = "crates/cbh-chess" }
 cbh-parser = { version = "0.1.0", path = "crates/cbh-parser" }
+cbh-fixtures = { version = "0.1.0", path = "crates/cbh-fixtures" }
 
 [workspace.lints.rust]
 missing_docs = "warn"

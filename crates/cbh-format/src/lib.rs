@@ -7,7 +7,11 @@
 //!
 //! Ported from `cbformat` in `oschess-cb-bridge` (MIT); see `docs/provenance.md`.
 
+pub mod cbh;
+pub mod codepage;
 pub mod error;
+pub mod file;
+pub mod game;
 pub mod tables;
 
 pub use error::{Error, Result, Role};

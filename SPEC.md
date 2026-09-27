@@ -43,8 +43,9 @@ their header magic; both are read through the same model.
 
 - Records are **46 bytes**, big-endian fields; record *n* starts at `46·n`; the file
   begins with a 46-byte header record whose first fields repeat the count
-  (`records + 1` at offset 6 as `00 AA 27 10`-style values observed for Mega 2025)
-  `[NB]`.
+  (`records + 1` at offset 6 as `00 AA 27 10`-style values observed for Mega 2025);
+  its record-size field at 0x03 reads 46 and its byte 0x05 reads 1 in the Mega (the
+  format version the reader exposes) `[NB]`.
 - Record framing: `[u8 flags][u32 big-endian offset into .cbg]` then the entity ids,
   packed date, result, round/subround, both Elo values, ECO, medals, flags word and
   mainline move count `[NB]` `[SRC]`.
@@ -72,12 +73,34 @@ their header magic; both are read through the same model.
 
 ### 2.4 Namebases `.cbp .cbt .cbc .cbs .cbe .cbl .cbm .cbtt`
 
-- Fixed-size records, per-file byte order, entity id = record index (0-based); records
-  form a sorted tree a by-id reader can ignore; text is a single-byte code page
-  (section 2.6); an empty/placeholder entity decodes to an empty string `[FN]` `[SRC]`.
-- `.cbj` extends `.cbg`/`.cba` offsets to 64 bits for files over 4 GiB `[FN]`.
-- `.flags` is an 8-byte header (`0F 01 0B 09 00 00 00 00` on Mega 2025) then a bit
-  array, ≈2 bits per record `[NB]`.
+- Fixed-size records, per-file byte order (the `.cbh` records are big-endian; the
+  namebase headers and records are little-endian), entity id = record index (0-based);
+  a record's first nine bytes are its place in a sorted tree (two 32-bit child
+  indexes and one byte this reader skips) and the left child `-999` marks a deleted
+  record; text is a single-byte code page (section 2.5); an empty/placeholder entity
+  decodes to an empty string `[FN]` `[SRC]` `[NB]`.
+- Player records hold last name then first name at 30 bytes each pair's boundary,
+  tournament records a title and a place, annotators and sources one text each; the
+  header's magic at 0x08 is 1,234,567,890 and the record data size sits at 0x0c `[SRC]`.
+- `.cbe` (teams) has the same header; a record's name is its first 50 bytes
+  (67,572 records in Mega 2025; names like `101 Chess Academy`) `[NB]`.
+- `.cbl` (18 records in Mega 2025, 1,608 data bytes each) is the same header with
+  text in fields of 200 bytes at offsets 0/200/…/1400 and 8 trailing bytes of unknown
+  purpose; `Cross Table` sits in record 1's third field and `Introduction` in record
+  16's first, so the reader takes fields at those offsets `[NB]`.
+- `.cbtt` starts with a little-endian `[u32 kind = 5][u32 record size][u32 count]`;
+  the Mega's is 105,350 records of 405 bytes (one per tournament) after a 437-byte
+  header whose middle (425 bytes) is **unknown**; records are addressed from the end
+  of the file, where the last one ends `[NB]`.
+- `.cbj` extends `.cbg`/`.cba` offsets to 64 bits for files over 4 GiB: a 32-byte
+  little-endian header (version 11, record size 120, count) then big-endian records
+  with the annotations offset at 0x0c and the moves offset at 0x1e `[FN]` `[NB]`.
+- `.flags` is a 12-byte header (`0F 01 0B 09`, a big-endian word count of 696,960,
+  then `00 00 00 02`) and an array of 4-byte big-endian words, each sixteen records of
+  two bits, low pair first, record *i* in pair `i % 16` of word `i / 16`. Every record
+  of the Mega reads 2 except a marked selection reading 3 (1,841,802 of 11,151,119,
+  the *Top Games* bits of the task) and one record (id 12) reading 0; the spare
+  capacity at the end reads 0 `[NB]`.
 
 ### 2.5 Codepages
 
@@ -233,6 +256,13 @@ See `docs/research/00-cbv-facts.md` (task 0.3) for the full evidence. In brief:
 11. 2CBH move-encoding differences from classic beyond the documented words (to be
     confirmed on the local `MyPGNDownloads.2cbh` in Phase 2/3) `[SPEC]`.
 12. Codepage detection edge cases in older databases `[FN]` `[SPEC]`.
+13. `.flags` bit semantics: value 2 on every record and 3 on the marked selection is
+    what the Mega stores; the *Top Games* reading of the low bit is the task's name
+    for it, and what a 0 on record 12 means is unknown `[NB]`.
+14. `.cbl`'s eight trailing bytes per record and the purpose of its eight fields `[NB]`.
+15. `.cbtt`'s header middle (425 bytes in the Mega, 20 in the History sets) and the
+    content of its records (no plain text in the Mega's) `[NB]`.
+16. `.cbe`'s 13 bytes after the 50-byte team name (year-like values observed) `[NB]`.
 
 ## 9. What has been verified on real data (this change)
 

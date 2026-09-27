@@ -34,6 +34,9 @@ dependencies = [
 [[package]]
 name = "cbh-format"
 version = "0.1.0"
+dependencies = [
+ "cbh-fixtures",
+]
 
 [[package]]
 name = "cbh-parser"

@@ -1,0 +1,219 @@
+//! Database files read at positions, never mapped in memory.
+//!
+//! Ported from `cbformat` in `oschess-cb-bridge` @ `ca9e8f8e` (MIT); modified by
+//! cbh-parser: short reads report the typed [`Error::Truncated`] with file and
+//! offset instead of a bare I/O error. See `docs/provenance.md`.
+
+use std::fs::File;
+use std::path::{Path, PathBuf};
+
+#[cfg(windows)]
+use std::sync::Mutex;
+
+use crate::error::{Error, Result};
+
+/// Most spare handles a file keeps for its readers; a reader beyond them opens
+/// one for its read and closes it after.
+#[cfg(windows)]
+const SPARE_HANDLES: usize = 64;
+
+/// One file of a database, read at positions.
+#[derive(Debug)]
+pub struct DbFile {
+    file: File,
+    /// Boxed, so that a database of many files stays small with the handles
+    /// below.
+    path: Box<Path>,
+    /// Windows reads through one handle one read at a time, so readers at the
+    /// same time each take a handle of their own, opened again from `file`,
+    /// and leave it here for the next read.
+    #[cfg(windows)]
+    spare: Box<Mutex<Vec<File>>>,
+}
+
+impl DbFile {
+    /// Opens `path` for reading.
+    pub fn open(path: PathBuf) -> Result<DbFile> {
+        let file = File::open(&path).map_err(|source| Error::Io { path: path.clone(), source })?;
+        Ok(DbFile {
+            file,
+            path: path.into_boxed_path(),
+            #[cfg(windows)]
+            spare: Box::default(),
+        })
+    }
+
+    /// The file's size in bytes.
+    pub fn size(&self) -> Result<u64> {
+        self.len()
+    }
+
+    /// The file's size in bytes (the crate's internal name for [`Self::size`]).
+    pub(crate) fn len(&self) -> Result<u64> {
+        self.file.metadata().map(|m| m.len()).map_err(|source| Error::Io { path: self.path.to_path_buf(), source })
+    }
+
+    /// The file's path, for diagnostics.
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// Fills `buf` from `offset`; a file too short for the request is
+    /// [`Error::Truncated`] with the offset and the sizes.
+    pub fn read_into(&self, offset: u64, buf: &mut [u8]) -> Result<()> {
+        let read = self.with_handle(|file| read_exact_at(file, buf, offset));
+        match read {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
+                let len = self.len().unwrap_or(offset);
+                let available = usize::try_from(len.saturating_sub(offset)).unwrap_or(usize::MAX);
+                Err(Error::Truncated { path: self.path.to_path_buf(), offset, needed: buf.len(), available })
+            }
+            Err(source) => Err(Error::Io { path: self.path.to_path_buf(), source }),
+        }
+    }
+
+    /// `len` bytes from `offset`. Callers bound `len` first.
+    pub fn read(&self, offset: u64, len: usize) -> Result<Vec<u8>> {
+        let mut buf = vec![0; len];
+        self.read_into(offset, &mut buf)?;
+        Ok(buf)
+    }
+
+    /// Calls `read` with a handle of the file that no other reader uses now:
+    /// a spare one, or one opened again from the file's own; the file's own
+    /// when it cannot be opened again.
+    #[cfg(windows)]
+    fn with_handle<T>(&self, read: impl FnOnce(&File) -> std::io::Result<T>) -> std::io::Result<T> {
+        let spare = self.spare.lock().unwrap_or_else(|e| e.into_inner()).pop();
+        let Some(handle) = spare.or_else(|| reopen(&self.file).ok()) else { return read(&self.file) };
+        let result = read(&handle);
+        let mut spare = self.spare.lock().unwrap_or_else(|e| e.into_inner());
+        if spare.len() < SPARE_HANDLES {
+            spare.push(handle);
+        }
+        result
+    }
+
+    /// Calls `read` with the file's handle, which readers share: reads at
+    /// positions on it run at the same time.
+    #[cfg(not(windows))]
+    fn with_handle<T>(&self, read: impl FnOnce(&File) -> std::io::Result<T>) -> std::io::Result<T> {
+        read(&self.file)
+    }
+}
+
+/// The paths `stem` takes with each of `extensions` appended.
+pub fn with_extensions(stem: &Path, extensions: &[&str]) -> Vec<PathBuf> {
+    extensions
+        .iter()
+        .map(|ext| {
+            let mut s = stem.as_os_str().to_owned();
+            s.push(ext);
+            PathBuf::from(s)
+        })
+        .collect()
+}
+
+#[cfg(windows)]
+fn reopen(file: &File) -> std::io::Result<File> {
+    use std::os::windows::io::{AsRawHandle, FromRawHandle, RawHandle};
+    /// Reopens a file from an open handle, keeping its file object.
+    unsafe extern "system" {
+        fn ReOpenFile(original: RawHandle, access: u32, share: u32, flags: u32) -> RawHandle;
+    }
+    const GENERIC_READ: u32 = 0x8000_0000;
+    // FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, as `File::open`
+    // shares a file.
+    const SHARE_ALL: u32 = 0x7;
+    // SAFETY: `file` holds its handle open for the whole call, and no flags
+    // are asked for, so the new handle reads synchronously as `file`'s does.
+    let handle = unsafe { ReOpenFile(file.as_raw_handle(), GENERIC_READ, SHARE_ALL, 0) };
+    if handle as isize == -1 {
+        return Err(std::io::Error::last_os_error());
+    }
+    // SAFETY: the handle was just opened, and the file made from it is its
+    // only owner.
+    Ok(unsafe { File::from_raw_handle(handle) })
+}
+
+#[cfg(windows)]
+fn read_exact_at(file: &File, mut buf: &mut [u8], mut offset: u64) -> std::io::Result<()> {
+    use std::os::windows::fs::FileExt;
+    while !buf.is_empty() {
+        match file.seek_read(buf, offset) {
+            Ok(0) => return Err(std::io::ErrorKind::UnexpectedEof.into()),
+            Ok(n) => {
+                buf = &mut buf[n..];
+                offset += n as u64;
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn read_exact_at(file: &File, buf: &mut [u8], offset: u64) -> std::io::Result<()> {
+    std::os::unix::fs::FileExt::read_exact_at(file, buf, offset)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp(name: &str, bytes: &[u8]) -> PathBuf {
+        let path = std::env::temp_dir().join(format!("cbh-format-file-{}-{name}", std::process::id()));
+        std::fs::write(&path, bytes).unwrap();
+        path
+    }
+
+    #[test]
+    fn reads_at_positions() {
+        let bytes: Vec<u8> = (0..=255u8).collect();
+        let path = temp("positions", &bytes);
+        let f = DbFile::open(path.clone()).unwrap();
+        let mut buf = [0u8; 4];
+        f.read_into(10, &mut buf).unwrap();
+        assert_eq!(buf, [10, 11, 12, 13]);
+        assert_eq!(f.len().unwrap(), 256);
+        assert_eq!(f.size().unwrap(), 256);
+        assert_eq!(f.read(254, 2).unwrap(), vec![254, 255]);
+        drop(f);
+        std::fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn a_short_read_is_truncation_with_offset() {
+        let path = temp("short", b"only ten b");
+        let f = DbFile::open(path.clone()).unwrap();
+        let e = f.read_into(6, &mut [0; 8]).unwrap_err();
+        match e {
+            Error::Truncated { offset, needed, available, .. } => {
+                assert_eq!((offset, needed, available), (6, 8, 4));
+            }
+            other => panic!("expected Truncated, got {other}"),
+        }
+        drop(f);
+        std::fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn a_missing_file_is_an_io_error_with_path() {
+        let path = std::env::temp_dir().join("cbh-format-file-does-not-exist");
+        let e = match DbFile::open(path) {
+            Err(e) => e,
+            Ok(_) => panic!("a file that does not exist must not open"),
+        };
+        assert!(matches!(e, Error::Io { .. }));
+        assert_eq!(e.path(), Some(std::env::temp_dir().join("cbh-format-file-does-not-exist").as_path()));
+    }
+
+    #[test]
+    fn extension_paths_append_verbatim() {
+        let stem = Path::new("/tmp/DB.mega");
+        let paths = with_extensions(stem, &[".cbh", ".cbg"]);
+        assert_eq!(paths, vec![PathBuf::from("/tmp/DB.mega.cbh"), PathBuf::from("/tmp/DB.mega.cbg")]);
+    }
+}

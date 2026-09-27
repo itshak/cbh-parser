@@ -49,18 +49,20 @@ State: `planned` until the porting task lands; then `ported`/`ported (chess swap
 
 | Ours | Upstream | Regime | State |
 |---|---|---|---|
-| `cbh-format` — `file`, `codepage` | `file.rs`, `codepage.rs` | port | planned (2.4) |
+| `cbh-format` — `file`, `codepage` | `file.rs`, `codepage.rs` | port | **ported** (2.1, 2.4) |
 | `cbh-format` — `tables` (move-mode byte tables) | `cbh/tables.rs` | port (raw format data; MIT `asdfjkl/cbh2pgn` credit kept) | **ported** (0.6) |
-| `cbh-format` — `cbh::{bytes, tables, record, entities, annotations, text, wide, window}` | `cbh/{bytes,tables,record,entities,annotations,text,wide,window}.rs` | port | planned (2.1–2.3) |
-| `cbh-format` — `cbh::moves` (record split, start decode) | `cbh/moves.rs` | port + chess swap (start board via `gigachess`) | planned (2.1, 3.3) |
-| `cbh-format` — `v2::{bytes, record, frame, entities, moves, window, annotations}` | `v2/**` | port | planned (2.1–2.3) |
-| `cbh-format` — `game::{head, fields, entities, start, annotations::{quote, timing}}` | `game/**` | port | planned (2.1–2.3, 4.1–4.2) |
+| `cbh-format` — `cbh::{bytes, record, entities, wide}` | `cbh/{bytes,record,entities,wide}.rs` | port | **ported** (2.1–2.3) |
+| `cbh-format` — `cbh::{annotations, text, window}` | `cbh/{annotations,text,window}.rs` | port | planned (3.4–3.5, 4.1) |
+| `cbh-format` — `cbh::moves` (record split, start decode) | `cbh/moves.rs` | port + chess swap (start board via `gigachess`) | planned (3.1, 3.3) |
+| `cbh-format` — `v2::{bytes, record, frame, entities, moves, window, annotations}` | `v2/**` | port | planned (2CBH follow-up change) |
+| `cbh-format` — `game::{head, fields, entities}` | `game/{head,fields,entities}.rs` | port | **ported** (2.1–2.3) |
+| `cbh-format` — `game::{start, annotations}` | `game/{start,annotations}.rs` | port | planned (3.3, 4.1–4.2) |
 | `cbh-chess` — `movetable` | `movetable/**` | port (raw format data — credited to MIT `asdfjkl/cbh2pgn`; ancestor states it follows the published format description) | planned (3.2) |
 | `cbh-chess` — `decode`, `pieces`, `replay` | `cbh/{decode,pieces}.rs`, `replay/**` | port + chess swap (`moves2`, `gigachess` legality, king→rook castling, Polyglot keys) | planned (3.2–3.4) |
 | `cbh-parser` — `view` | `view.rs` | port | planned (6.1) |
 | `cbh-parser` — `pgn::{san, tree, commands, comments, classic, mod}` | `pgn/**` | port + chess swap (SAN via `gigachess` at the boundary) | planned (3.5, 4.2) |
-| `cbh-fixtures` — classic writer | `fixture_cbh.rs`, `fixture_cbh/builder.rs` | port + chess swap | **ported (0.6)**; 2CBH writer (`fixture.rs`) pending Phase 2 |
-| `cbh-fixtures` — 2CBH writer | `fixture.rs` | port + chess swap | planned (0.6) |
+| `cbh-fixtures` — classic writer | `fixture_cbh.rs`, `fixture_cbh/builder.rs` | port + chess swap | **ported (0.6)**; 2CBH writer (`fixture.rs`) pending the 2CBH change |
+| `cbh-fixtures` — 2CBH writer | `fixture.rs` | port + chess swap | planned (2CBH follow-up) |
 
 ### Facts-only records
 
@@ -88,6 +90,9 @@ State: `planned` until the porting task lands; then `ported`/`ported (chess swap
 |---|---|
 | Workspace layout, `rustfmt.toml`, shared lints (`Cargo.toml`) | Original; conventions adapted from the ancestor (max width 120, small heuristics Max); nothing copied |
 | `cbh-format::error` — typed `Error`/`Result`/`Role` | Original (task 1.2); no panics on damaged input |
+| `cbh-format::cbh::flags` (`.flags`) | Original (task 2.2): layout and the Top Games bits established from the local Mega Database 2025 (facts in `SPEC.md` §2.4 and the real-database report); the ancestor lists `.flags` but reads it nowhere |
+| `cbh-format::cbh::textblocks` (`.cbl`) and `cbh::texttable` (`.cbtt`) | Original (task 2.3): record framing from our inspection of the local Mega 2025; the ancestor reads neither; `.cbtt`'s record content stays unverified (`SPEC.md` unknowns) |
+| `cbh-format::cbh::entities` reading of `.cbe` (teams) | The file uses the ancestor's entity-file framing; reading it as the teams namebase is ours (task 2.3) |
 | `cbh-format` — archive reader (`.cbv`, `.cbz`) | Clean-room per the protocol above; facts in `docs/research/00-cbv-facts.md` |
 | `cbh-parser` — `Database`, `GameIter`, `decode_game_into`, archive façade | Task 6.1, 5.3 |
 | `cbh-cli` — `info`, `verify`, `pgn`, `games`, `archive` | Task 5.3, 6.4 |
