@@ -207,6 +207,10 @@ See `docs/research/00-cbv-facts.md` (task 0.3) for the full evidence. In brief:
   (**unknown**); member order = name byte order `[INV]`.
 - Streams are a custom compressed format (not deflate/gzip/lzma/bzip2); the plan names
   block flags and an LZ/Huffman scheme; identification is task 5.1 `[INV]`.
+- The local sample is **complete** (validated 2026-09-27: no zero run ≥ 1 KiB, all 3,871
+  members present, and the oracle extraction matches the local set — 3,870 of 3,871
+  members byte-identical, with `.ini` the only expected difference because ChessBase
+  rewrites the local copy) `[INV]`.
 - `.cbz` decrypts with a password (legacy DES scheme); no local sample exists, so key
   derivation stays open until 5.2 `[INV]`.
 
@@ -236,6 +240,6 @@ See `docs/research/00-cbv-facts.md` (task 0.3) for the full evidence. In brief:
 |---|---|
 | Classic record math, `.cbg` framing, endpoint linkage, contiguity, counts | `docs/research/01-real-database-report.md` (Mega 2025) |
 | 11,151,119 records; 463,262 players; 105,350 tournaments; 2,480 annotators; 479 sources | `cbtool info` baseline (task 0.4) |
-| `.cbv` container layout and member list | `docs/research/00-cbv-facts.md` |
+| `.cbv` container layout and member list | `docs/research/00-cbv-facts.md` (complete-copy validation + member-by-member oracle comparison) |
 | Dual-format (classic/2CBH) pairs and their equality | to be re-verified per Phase 2/3 against the `History/Year_2026` pairs (task 0.8 inventory) |
 

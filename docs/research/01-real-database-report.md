@@ -9,7 +9,7 @@ directory in this repository is git-ignored; nothing here is committed or redist
 | Asset | Path | Size (bytes) | Notes |
 |---|---|---|---|
 | Classic set | `Mega Database 2025/Mega Database 2025.cbh` … `.ini` | see the table below | `.cbh .cbg .cbj .cba .cbp .cbt .cbc .cbs .cbe .cbl .cbm .cbtt .cko .cpo .flags .ico .ini` + `.bmp/` + `.html/` |
-| Master archive | `Mega Database 2025/Mega Database 2025.cbv` | 1,739,924,298 | magic `08 00 1F 0F AD 00 03 00`; first member `Mega Database 2025.cbh`; length equals the torrent's declared length |
+| Master archive | `Mega Database 2025/Mega Database 2025.cbv` | 1,739,924,298 | **complete** (validated 2026-09-27; SHA-256 `d3ae0bcfb8c914c347a32b1478de830a69ae6c058448e6bc7610d82141b837c2`); magic `08 00 1F 0F AD 00 03 00`; first member `Mega Database 2025.cbh`; length equals the torrent's declared length |
 | 2CBH set (large) | `~/Documents/ChessBase/Download/MyPGNDownloads.2cbh` | 21,143,232 | complete 2CBH family: `.2cbg` 31,391,312; `.2cba` 81,482,912; `.2lid` 204,328,891; `.2lgd` 24,709,132; `.2lcd` 2,445,312; `.ini` |
 | 2CBH sets (small) | `~/Documents/ChessBase/MyWork/AutoSave.2cbh`; `~/Documents/ChessBase/Books/Personalities/*.2cbh` | 576 … 5,376 | diagnostics and personalities |
 | Dual-format pair | `~/Documents/ChessBase/History/Year_2026/07-July/2026_07_05_Sunday.{cbh,2cbh}` | 828 / 384 | the same 17 games in both generations, with `.cit .cib .cit2 .cib2` boosters in the classic set |
@@ -89,7 +89,7 @@ Reproduce with the same tool build and machine; the asset hashes are in
 | Asset | Env var (default) | Generation | Phase that reads it |
 |---|---|---|---|
 | Classic Mega 2025 set (`.cbh .cbg .cbj .cba .cbp .cbt .cbc .cbs .cbe .cbl .cbm .cbtt .cko .cpo .flags .ico .ini` + `.bmp/` 272 + `.html/` 3,582) | `CBH_TEST_DB` = `Mega Database 2025/Mega Database 2025` (base name) | classic (46-byte records, 11,151,119) | 0.4 baseline, 2.x readers, 3.x decode, 4.x annotations, 6.1 façade |
-| Master archive (`.cbv`, 1,739,924,298 B; **incomplete**: last 762,651,466 B are zeros) | `CBH_TEST_CBV` = `Mega Database 2025/Mega Database 2025.cbv` | container | 0.3 facts, 5.1 archive reader (comparisons limited to the 3,858 present members) |
+| Master archive (`.cbv`, 1,739,924,298 B; **complete**, SHA-256 `d3ae0bcf…`) | `CBH_TEST_CBV` = `Mega Database 2025/Mega Database 2025.cbv` | container | 0.3 facts, 5.1 archive reader (all members) |
 | Password archive (`.cbz`) | `CBH_TEST_CBZ` — **not present on this machine** | container + DES | 5.2 (needs an owner-provided sample) |
 | 2CBH set, large: `.2cbh` 21,143,232; `.2cbg` 31,391,312; `.2cba` 81,482,912; `.2lid` 204,328,891; `.2lgd` 24,709,132; `.2lcd` 2,445,312; `.ini` 2,589 | `CBH_TEST_DB_2CBH` = `~/Documents/ChessBase/Download/MyPGNDownloads.2cbh` | 2CBH | 2.x readers, 3.x decode (2CBH path), 6.1 |
 | 2CBH set, small (`AutoSave.*`: `.2cbh` 576, `.2cbg` 552, `.2cba` 480, `.2lid` 8,688, `.2lgd` 1,548, `.2lcd` 40,960) | `CBH_TEST_DB_2CBH_SMALL` = `~/Documents/ChessBase/MyWork/AutoSave.2cbh` | 2CBH | smoke tests |
@@ -100,6 +100,10 @@ Reproduce with the same tool build and machine; the asset hashes are in
 Notes:
 - `MyPGNDownloads.2cbh` and the personalities have **no classic twin**; the June/July pairs
   are the only same-games-both-generations material found locally.
-- The Mega 2025 `.cbv`'s incompleteness (see `00-cbv-facts.md`) scopes Phase 5's local
-  validation to the members inside `[0, 0x3A400000)`.
+- The Mega 2025 `.cbv` was **replaced with a complete copy on 2026-09-27** (the earlier
+  copy was a partial download whose last 762,651,466 B were zeros, 43.8 %). The complete
+  copy validates: no zero run ≥ 1 KiB, all 3,871 members present, and the oracle
+  extraction compares **3,870 of 3,871 members byte-identical** with the local set —
+  `.ini` alone differs, because ChessBase rewrote the local copy (`00-cbv-facts.md`). The
+  superseded copy's SHA-256 was `e8a24312…`; the current one is `d3ae0bcf…`.
 
