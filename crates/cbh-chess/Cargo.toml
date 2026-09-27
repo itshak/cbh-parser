@@ -11,5 +11,8 @@ rust-version.workspace = true
 cbh-format.workspace = true
 gigachess.workspace = true
 
+[dev-dependencies]
+cbh-fixtures.workspace = true
+
 [lints]
 workspace = true

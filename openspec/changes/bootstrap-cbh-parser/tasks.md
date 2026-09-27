@@ -27,12 +27,12 @@
 
 ## Phase 3 — Games onto gigachess
 
-- [ ] 3.1 Port the `.cbg` record framing (flags, 3-byte size, holes, optional start-position bitmap). Verify: fixture tests for standard and non-standard starts.
-- [ ] 3.2 Implement the move-token decoder against a `gigachess` board; emit `moves2` into a caller buffer; remove all `chesscore` usage. Verify: golden SAN equality with reference PGN on fixtures.
-- [ ] 3.3 Castling and Chess960 mapping to king→rook encoding; start-position setup via gigachess (Shredder-FEN). Verify: 960 fixtures plus the Polyglot-key equality test.
-- [ ] 3.4 Variation tree with push/pop and skipped-move tokens preserved. Verify: nested-variation fixtures.
-- [ ] 3.5 Streaming PGN writer (SAN via gigachess at the boundary). Verify: fixture exports match golden files; memory flat on repeated export.
-- [ ] 3.6 Performance pass and first Criterion benches vs baseline; record deltas. Verify: no budget regression; report committed.
+- [x] 3.1 Port the `.cbg` record framing (flags, 3-byte size, holes, optional start-position bitmap). Verify: fixture tests for standard and non-standard starts.
+- [x] 3.2 Implement the move-token decoder against a `gigachess` board; emit `moves2` into a caller buffer; remove all `chesscore` usage. Verify: golden SAN equality with reference PGN on fixtures.
+- [x] 3.3 Castling and Chess960 mapping to king→rook encoding; start-position setup via gigachess (Shredder-FEN). Verify: 960 fixtures plus the Polyglot-key equality test.
+- [x] 3.4 Variation tree with push/pop and skipped-move tokens preserved. Verify: nested-variation fixtures.
+- [x] 3.5 Streaming PGN writer (SAN via gigachess at the boundary). Verify: fixture exports match golden files; memory flat on repeated export.
+- [x] 3.6 Performance pass and first Criterion benches vs baseline; record deltas. Verify: no budget regression; report committed.
 
 ## Phase 4 — Annotations
 

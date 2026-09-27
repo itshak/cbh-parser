@@ -8,3 +8,8 @@
 //! There is exactly one chess core in this repository, and it is `gigachess`.
 //! Ported from `cbformat` in `oschess-cb-bridge` (MIT), re-based on `gigachess`;
 //! see `docs/provenance.md`.
+
+pub mod decode;
+pub mod pieces;
+pub mod start;
+pub mod tree;

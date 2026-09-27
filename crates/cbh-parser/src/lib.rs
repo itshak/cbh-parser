@@ -5,3 +5,5 @@
 //! The API sketch of the change's design is implemented in later tasks of
 //! `bootstrap-cbh-parser`: `Database::open`, `Database::headers`,
 //! `Database::decode_game_into(&mut MovesBuf)` and the PGN writer.
+
+pub mod pgn;

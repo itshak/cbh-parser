@@ -170,6 +170,11 @@ their header magic; both are read through the same model.
 - Decoding walks the tree with piece lists next to the board: pieces of a kind are
   numbered by a scan of the start position; a capture moves the numbers above it down;
   pawns keep their number all game. Branches save and restore both `[FN]` `[SRC]`.
+- Compact code 0 means the null move (a pass) in any position, decoded as the
+  `moves2` marker `0xffff` and played on the board through `gigachess`'s
+  `Board::make_null_move` (forbidden in check; flips the turn, clears en passant,
+  advances the halfmove clock, completes the move — the Mega's 2,975 passed turns
+  decode this way) `[SRC]` `[NB]`; PGN renders it as `--` `[SPEC]`.
 - Start positions: standard, an explicit set-up (28 bytes: side to move + en-passant
   byte, castling byte, move number byte, then 64 bytes of pieces by ChessBase square
   numbering, a1=0, a2=1, file by file), plus, for modes 10/11, 8 bytes naming the

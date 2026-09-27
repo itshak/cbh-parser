@@ -18,6 +18,7 @@ use crate::file::DbFile;
 pub mod bytes;
 pub mod entities;
 pub mod flags;
+pub mod moves;
 pub mod record;
 pub mod textblocks;
 pub mod texttable;
@@ -25,6 +26,7 @@ pub mod wide;
 
 pub use entities::{Entities, Entity};
 pub use flags::Flags;
+pub use moves::GameMoves;
 pub use record::{GameHeader, RECORD_SIZE};
 pub use textblocks::TextBlocks;
 pub use texttable::TextTable;

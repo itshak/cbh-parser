@@ -100,5 +100,21 @@
     "sequential_decode_vs_upstream": "not slower",
     "pgn_export_vs_upstream": "within 1.2x",
     "peak_memory": "bounded by caller buffers; upstream baselines above"
+  },
+  "phase3": {
+    "recorded": "2026-09-27",
+    "task": "bootstrap-cbh-parser 3.6",
+    "note": "First Criterion benches on generated fixtures (256 short games with variations, Apple M1 Max, release profile): sequential decode and PGN export through reused caller buffers. Upstream comparison is pending a like-for-like run on the same machine; the budgets recorded above stay the gate.",
+    "workloads": {
+      "sequential_decode_256_games": {
+        "time": "606.05 us - 609.66 us",
+        "throughput": "419.91 Kelem/s - 422.41 Kelem/s"
+      },
+      "pgn_export_256_games": {
+        "time": "1.2967 ms - 1.3069 ms",
+        "throughput": "195.88 Kelem/s - 197.42 Kelem/s"
+      }
+    },
+    "memory": "one game's buffers reused across the run (MovesBuf with capacity 256; PgnWriter under 64 KiB on 64 fixture games, under 256 KiB on the real-database PGN sample)"
   }
 }

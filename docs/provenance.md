@@ -58,9 +58,9 @@ State: `planned` until the porting task lands; then `ported`/`ported (chess swap
 | `cbh-format` — `game::{head, fields, entities}` | `game/{head,fields,entities}.rs` | port | **ported** (2.1–2.3) |
 | `cbh-format` — `game::{start, annotations}` | `game/{start,annotations}.rs` | port | planned (3.3, 4.1–4.2) |
 | `cbh-chess` — `movetable` | `movetable/**` | port (raw format data — credited to MIT `asdfjkl/cbh2pgn`; ancestor states it follows the published format description) | planned (3.2) |
-| `cbh-chess` — `decode`, `pieces`, `replay` | `cbh/{decode,pieces}.rs`, `replay/**` | port + chess swap (`moves2`, `gigachess` legality, king→rook castling, Polyglot keys) | planned (3.2–3.4) |
+| `cbh-chess` — `decode`, `pieces`, `tree`, `start` | `cbh/{decode,pieces}.rs`, `replay/**`, `game/start.rs` | port + chess swap (`moves2`, `gigachess` legality incl. null moves via `make_null_move`, king→rook castling, Polyglot keys) | **ported** (3.1–3.4) |
 | `cbh-parser` — `view` | `view.rs` | port | planned (6.1) |
-| `cbh-parser` — `pgn::{san, tree, commands, comments, classic, mod}` | `pgn/**` | port + chess swap (SAN via `gigachess` at the boundary) | planned (3.5, 4.2) |
+| `cbh-parser` — `pgn::{san, tree, commands, comments, classic, mod}` | `pgn/**` | port + chess swap (streaming writer, SAN via `gigachess` at the boundary; null moves as `--`) | **ported** (3.5) |
 | `cbh-fixtures` — classic writer | `fixture_cbh.rs`, `fixture_cbh/builder.rs` | port + chess swap | **ported (0.6)**; 2CBH writer (`fixture.rs`) pending the 2CBH change |
 | `cbh-fixtures` — 2CBH writer | `fixture.rs` | port + chess swap | planned (2CBH follow-up) |
 

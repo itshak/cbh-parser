@@ -75,8 +75,7 @@ impl Lists {
         l
     }
 
-    fn apply(&mut self, b: &Board, mv: Move) {
-        let us = b.turn();
+    fn apply(&mut self, b: &Board, us: Color, mv: Move) {
         let (me, them) = (us.index(), us.other().index());
         let (from, to) = (cb(mv.from()), cb(mv.to()));
         let moving = b.piece_at(mv.from()).expect("a piece").role;
@@ -113,9 +112,10 @@ impl Lists {
         }
     }
 
-    /// The one-byte code of a move of a non-king piece, when it has one.
-    fn code(&self, b: &Board, mv: Move) -> Option<u8> {
-        let us = b.turn();
+    /// The one-byte code of a move by `us` of a non-king piece, when it has
+    /// one. `us` is the decoder's turn, which may not be the turn of the
+    /// encoder's own board after a `--` handed it over.
+    fn code(&self, b: &Board, us: Color, mv: Move) -> Option<u8> {
         let (from, to) = (cb(mv.from()), cb(mv.to()));
         let d = ((to / 8 + 8 - from / 8) % 8, (to % 8 + 8 - from % 8) % 8);
         let moving = b.piece_at(mv.from())?.role;
@@ -146,12 +146,38 @@ impl Lists {
 }
 
 /// The legal move whose UCI text is `uci` (promotion letters included).
-fn uci_move(b: &Board, uci: &str) -> Move {
-    b.legal_moves()
-        .iter()
-        .copied()
-        .find(|mv| mv.to_string() == uci)
-        .unwrap_or_else(|| panic!("illegal or unknown fixture move {uci}"))
+/// `side` is the side the decoder will be on when it reads this token: after
+/// a `--` that is the other side, since the null move flips the turn. The
+/// encoder's own board stays on its turn (its piece lists stay aligned with
+/// the decoder's), so the lookup probes the position after a pass.
+fn uci_move_for(side: gigachess::Color, b: &Board, uci: &str) -> Move {
+    let mut probe = *b;
+    while probe.turn() != side {
+        probe.make_null_move().expect("a null move outside check");
+    }
+    let found = probe.legal_moves().iter().copied().find(|mv| {
+        let mut text = format!("{}{}", alg(mv.from()), alg(mv.to()));
+        if let Some(p) = mv.promotion() {
+            text.push(match p {
+                gigachess::Role::Queen => 'q',
+                gigachess::Role::Rook => 'r',
+                gigachess::Role::Bishop => 'b',
+                gigachess::Role::Knight => 'n',
+                gigachess::Role::Pawn | gigachess::Role::King => panic!("a promotion to {p:?}"),
+            });
+        }
+        text == uci
+    });
+    found.unwrap_or_else(|| {
+        let legal: Vec<String> =
+            probe.legal_moves().iter().copied().map(|mv| format!("{}{}", alg(mv.from()), alg(mv.to()))).collect();
+        panic!("illegal or unknown fixture move {uci} for {side:?} in {} (legal: {legal:?})", probe.to_fen())
+    })
+}
+
+/// A square as its `e2` text.
+fn alg(sq: gigachess::Square) -> String {
+    String::from_utf8_lossy(&sq.to_alg()).into_owned()
 }
 
 /// The byte that a decoder in encoding mode `mode` translates to `value`
@@ -179,15 +205,20 @@ pub fn encode(start: &Board, toks: &[Tok<'_>], mode: u8, two_byte: bool) -> Vec<
     let (tr, simple) = translator(mode);
     let (mut board, mut lists, mut stack, mut out) = (*start, Lists::new(start), Vec::new(), Vec::new());
     let (mut n, mut var, mut last) = (0u8, false, None::<(usize, u16, u8)>);
+    // The side the next token plays: a `--` hands the turn over, so the token
+    // after it encodes for the other side — but the encoder's own board only
+    // flips when a real move is played, keeping its piece lists aligned with
+    // the decoder's. (The decoder flips its board on the null code itself.)
+    let mut side = start.turn();
     for t in toks {
         match t {
             Tok::Var if simple => {
                 var = true;
-                stack.push((board, lists.clone()));
+                stack.push((board, lists.clone(), side));
             }
             Tok::Var => {
                 out.push(tr(254, n));
-                stack.push((board, lists.clone()));
+                stack.push((board, lists.clone(), side));
             }
             Tok::End => {
                 if simple {
@@ -199,20 +230,42 @@ pub fn encode(start: &Board, toks: &[Tok<'_>], mode: u8, two_byte: bool) -> Vec<
                 } else {
                     out.push(tr(255, n));
                 }
-                if let Some((b, l)) = stack.pop() {
-                    (board, lists) = (b, l);
+                if let Some((b, l, s)) = stack.pop() {
+                    (board, lists, side) = (b, l, s);
                 }
             }
             Tok::Mv(m) => {
-                let us = board.turn();
+                // `side` is the decoder's exact turn: a `--` hands it over so
+                // the token after a pass encodes for the other side. The
+                // move lookup and list update run for `side` on a position
+                // with that turn (probed from the stored board across a
+                // pass), while the stored board itself flips only on played
+                // moves and written passes — so the real line keeps its own
+                // legality and a variation restores both together, which a
+                // `--` before a `Var` needs.
+                let us = side;
                 let kingside = match *m {
                     "O-O" => Some(true),
                     "O-O-O" => Some(false),
                     _ => None,
                 };
-                let (mv, word) = if *m == "--" {
-                    panic!("null moves are not supported by the fixture encoder (gigachess has no null move)");
-                } else if let Some(kingside) = kingside {
+                if *m == "--" {
+                    // A pass: the pieces and lists stand, but the pending
+                    // side flips for the moves that follow. The decoder reads
+                    // compact code 0 as the null move, whatever the position,
+                    // and flips its own board — the encoder's own board stays
+                    // so its piece lists stay aligned, and the counter moves
+                    // since the tables are keyed by moves decoded so far.
+                    if simple {
+                        panic!("null moves are not supported by the simple encoder");
+                    }
+                    out.push(tr(0, n));
+                    var = false;
+                    n = n.wrapping_add(1);
+                    side = side.other();
+                    continue;
+                }
+                let (mv, word) = if let Some(kingside) = kingside {
                     let rook = board.castling_rook_square(castle_right_bit(us, kingside));
                     let back = if us == Color::White { 0 } else { 7 };
                     let dest = Square::from_coords(if kingside { 6 } else { 2 }, back);
@@ -224,7 +277,7 @@ pub fn encode(start: &Board, toks: &[Tok<'_>], mode: u8, two_byte: bool) -> Vec<
                     };
                     (Some(Move::new(king, rook, None)), word)
                 } else {
-                    let mv = uci_move(&board, m);
+                    let mv = uci_move_for(us, &board, m);
                     let promo = mv.promotion().map_or(0, |p| {
                         [Role::Queen, Role::Rook, Role::Bishop, Role::Knight].iter().position(|&x| x == p).unwrap()
                             as u16
@@ -238,9 +291,8 @@ pub fn encode(start: &Board, toks: &[Tok<'_>], mode: u8, two_byte: bool) -> Vec<
                     out.push(tr(w as u8, n));
                 } else {
                     let one = match (mv, kingside) {
-                        (None, _) => Some(0),
                         (Some(_), Some(k)) if mode != 10 => Some(if k { 9 } else { 10 }),
-                        (Some(mv), None) => lists.code(&board, mv),
+                        (Some(mv), None) => lists.code(&board, us, mv),
                         _ => None,
                     };
                     match one.filter(|&c| !(two_byte && c != 0)) {
@@ -250,8 +302,22 @@ pub fn encode(start: &Board, toks: &[Tok<'_>], mode: u8, two_byte: bool) -> Vec<
                 }
                 var = false;
                 if let Some(mv) = mv {
-                    lists.apply(&board, mv);
-                    board.play(mv).expect("legal fixture move");
+                    lists.apply(&board, us, mv);
+                    if board.turn() == us {
+                        board.play(mv).expect("legal fixture move");
+                    } else {
+                        // The move plays the other side across a pass: the
+                        // stored line keeps its own board (its absolute
+                        // squares stand, so the lists stay aligned), and the
+                        // pieces move on the probed one.
+                        let mut probe = board;
+                        while probe.turn() != us {
+                            probe.make_null_move().expect("a null move outside check");
+                        }
+                        probe.play(mv).expect("legal fixture move");
+                        let _ = probe;
+                    }
+                    side = side.other();
                 }
                 n = n.wrapping_add(1);
             }
