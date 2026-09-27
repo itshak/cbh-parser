@@ -103,15 +103,17 @@ impl Setup {
     }
 
     /// The file of the rook a castling right uses, when the position holds
-    /// one: the file the record names, else the outermost rook on the wing of
-    /// the king.
+    /// one. This mirrors the ancestor's `setup_board`: a named king off its
+    /// square drops the colour's rights; a named rook on the right wing is
+    /// used; else a Chess960 game takes the outermost rook on the wing and a
+    /// standard game with the king at home takes the corner rook. A stray bit
+    /// never makes the position unbuildable, and a standard game never needs
+    /// the record to name anything.
     pub fn rook_file(&self, color: Color, kingside: bool) -> Option<u8> {
         let back = back_rank(color);
         let at = |f: u8| self.pieces[Square::from_coords(f, back).index()];
         let king_file = (0..8u8).find(|&f| at(f) == Some((color, Role::King)))?;
-        if let Some(named) = self.castling_kings[side_index(color)]
-            && named != king_file
-        {
+        if self.castling_kings[side_index(color)].is_some_and(|named| named != king_file) {
             return None;
         }
         let wing_rook = |f: u8| at(f) == Some((color, Role::Rook)) && (f > king_file) == kingside;
@@ -120,8 +122,12 @@ impl Setup {
         {
             return Some(named);
         }
-        let files = (0..8u8).filter(|&f| wing_rook(f));
-        if kingside { files.max() } else { files.min() }
+        if self.chess960 {
+            let files = (0..8u8).filter(|&f| wing_rook(f));
+            return if kingside { files.max() } else { files.min() };
+        }
+        let home = if kingside { 7 } else { 0 };
+        (king_file == 4 && wing_rook(home)).then_some(home)
     }
 }
 
@@ -219,13 +225,31 @@ pub fn start_board(start: &Start) -> Result<Board> {
         Start::Standard => Ok(Board::startpos()),
         Start::Chess960(n) => {
             let placement = chess960_placement(*n).ok_or_else(|| bad(&format!("Chess960 position {n}")))?;
+            // The rights ride on where the generated placement actually puts
+            // the king and the rooks, not on the standard files: 811's king
+            // stands on b1 with rooks on a1/c1, and hardcoding e1/h1 would
+            // silently drop every right.
+            let king = |rank: u8, color: Color| {
+                (0..8u8).find(|&f| placement[Square::from_coords(f, rank).index()] == Some((color, Role::King)))
+            };
+            let rooks = |rank: u8, color: Color, king: u8| {
+                let mut files = (0..8u8).filter(|&f| {
+                    placement[Square::from_coords(f, rank).index()] == Some((color, Role::Rook)) && f != king
+                });
+                // Queenside first, kingside second, matching `castling_rooks`.
+                (files.next(), files.next_back())
+            };
+            let wk = king(0, Color::White).unwrap_or(4);
+            let bk = king(7, Color::Black).unwrap_or(4);
+            let (wq, wking) = rooks(0, Color::White, wk);
+            let (bq, bking) = rooks(7, Color::Black, bk);
             let setup = Setup {
                 chess960: true,
                 move_number: 1,
                 side_to_move: Color::White,
                 castling: 0x0f,
-                castling_rooks: [Some(0), Some(7), Some(0), Some(7)],
-                castling_kings: [Some(4), Some(4)],
+                castling_rooks: [wq, wking, bq, bking],
+                castling_kings: [Some(wk), Some(bk)],
                 en_passant_file: None,
                 en_passant_raw: 0,
                 pieces: placement,

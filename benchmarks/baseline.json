@@ -116,5 +116,55 @@
       }
     },
     "memory": "one game's buffers reused across the run (MovesBuf with capacity 256; PgnWriter under 64 KiB on 64 fixture games, under 256 KiB on the real-database PGN sample)"
+  },
+  "megabase_rerun": {
+    "recorded": "2026-09-28",
+    "machine": "same MacBookPro18,2 (Apple M1 Max) as the 0.4 baseline",
+    "tool": "local-only example crates/cbh-parser/examples/megabase.rs (move-decode parity + main-line SAN sample; .cba checks are phase 4, not ported yet)",
+    "note": "Same-database, same-machine comparison after the Chess960/standard castling-rights fix (rook_file mirrors upstream setup_board; generated Chess960 starts use their own king/rook files). Full PGN export was not re-run: /tmp filled during the earlier attempt (2.6 GiB partial ours.pgn, 5.3 GiB partial upstream.pgn); SAN parity below covers exact-output on the sampled games instead.",
+    "upstream_verify": {
+      "command": "CBTOOL_THREADS=1 cbtool verify",
+      "seconds": 53.3,
+      "records_per_second": 209357,
+      "peak_rss_bytes": 14155776,
+      "reported": {
+        "games": 11149379,
+        "guiding_texts": 1740,
+        "deleted": 0,
+        "chess960": 892,
+        "setup_positions": 2147,
+        "main_line_plies": 869502065,
+        "all_plies": 883141297,
+        "null_moves": 2975,
+        "en_passant": 600106,
+        "promotion_captures": 79114,
+        "annotated_games": 303674,
+        "failures": 9
+      }
+    },
+    "ours_decode": {
+      "seconds": 67.62,
+      "records_per_second": 164903,
+      "plies_per_second": 13059937,
+      "peak_rss_bytes": 3047424,
+      "reported": {
+        "games": 11149379,
+        "guiding_texts": 1740,
+        "unknown_kind": 0,
+        "deleted": 0,
+        "chess960": 892,
+        "setup_positions": 2147,
+        "main_line_plies": 869502065,
+        "all_plies": 883141297,
+        "null_moves": 2975,
+        "en_passant": 600106,
+        "promotion_captures": 79114,
+        "annotated_games_by_header_offset": 303675,
+        "failures": 5
+      },
+      "verdict": "all move-decode counters match upstream exactly (plies, nulls, EP, promo captures, chess960, setups); ~1.27x slower single-threaded (67.6 s vs 53.3 s), inside the pgn 1.2x-adjacent range but over the decode 'not slower' budget; 3.0 MiB peak RSS vs 13.5 MiB upstream"
+    },
+    "failure_delta": "the 4 missing failures are all upstream annotation-position failures (.cba phase 4, not ported): 2455498 (size out of range), 5614728/5614732/5614734 (annotations at position 0 in games without moves). The 5 move-decode failures match upstream byte-for-byte (489834, 3079389, 3079410, 7168922, 8076798)",
+    "san_sample": "14 sampled games (ids 1-2, 2601298-2601308 incl. the Chess960 811 castling games, 2602603, last 2 records): 13/14 main lines identical to cbtool pgn; the one diff (2601298) is our sample emitting the main line only while upstream movetext continues into variations past ply 21"
   }
 }
