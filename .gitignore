@@ -5,6 +5,9 @@
 # macOS
 .DS_Store
 
+# The pinned upstream ancestor snapshot (local-only; see docs/port-inventory.md)
+/vendor/
+
 # Local test material: real databases are never committed
 /fixtures-local/
 *.cbh
