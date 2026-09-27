@@ -88,8 +88,9 @@ impl Report {
     }
 }
 /// A gold game: tag pairs plus movetext tokens (move numbers dropped, SAN
-/// body / `--` / result kept; `{comment}`, `(`, `)`, `$NAG` kept as scope
-/// markers so annotated games can be excluded).
+/// body / result kept; `{comment}`, `(`, `)`, `$NAG` kept as scope markers
+/// so annotated games can be excluded; ChessBase's null-move spelling `Z0`
+/// normalized to our `--`).
 struct GoldGame {
     tags: Vec<(String, String)>,
     tokens: Vec<String>,
@@ -159,8 +160,10 @@ fn unescape(v: &str) -> String {
 }
 
 /// Movetext tokens with formatting normalized: bare move numbers dropped,
-/// `+`/`#` suffixes stripped; `{...}` comments, parens and `$NAG` kept as
-/// markers (they put the game out of scope).
+/// `+`/`#` suffixes stripped, ChessBase's null-move spelling `Z0` mapped to
+/// our `--` (upstream `cbformat` agrees: its tree builder emits `"--"` and
+/// its SAN parser merely accepts both); `{...}` comments, parens and `$NAG`
+/// kept as markers (they put the game out of scope).
 fn tokenize_movetext(line: &str) -> Vec<String> {
     let mut tokens = Vec::new();
     let mut chars = line.chars().peekable();
@@ -200,7 +203,10 @@ fn tokenize_movetext(line: &str) -> Vec<String> {
             }
             let is_number = !tok.is_empty() && tok.trim_end_matches('.').chars().all(|d| d.is_ascii_digit());
             if !is_number {
-                tokens.push(tok.trim_end_matches(['+', '#']).to_owned());
+                let tok = tok.trim_end_matches(['+', '#']).to_owned();
+                // ChessBase's exporter spells the null move `Z0`; our (and
+                // upstream's) PGN spells it `--`.
+                tokens.push(if tok == "Z0" { "--".to_owned() } else { tok });
             }
         }
     }
