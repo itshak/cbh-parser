@@ -1,0 +1,18 @@
+[package]
+name = "cbh-cli"
+description = "The `cbh` command line: info, verify, pgn, games and archive"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "cbh"
+path = "src/main.rs"
+
+[dependencies]
+cbh-parser.workspace = true
+
+[lints]
+workspace = true

@@ -47,10 +47,38 @@ directory in this repository is git-ignored; nothing here is committed or redist
 - Hole semantics: a naive `.cbg` chain stops at 0x1DBD8C (≈1.95 MB); consistent with 512-byte holes after rewritten records, so records must be addressed through `.cbh`/`.cbgi` offsets.
 - `.ini` `[Descr2CBG] “Megabase_02 (2cbh)”` in a classic set, `.cpo` being rewritten on open, and `[ProtocolCBG]` naming (`MegaBase_01`, `Mega25_latest`).
 
-## Pending (task 0.4)
+## Baseline (task 0.4) — upstream `cbformat` on this machine
 
-- Upstream `cbformat` baseline: open time, sequential decode games/s, PGN export throughput, peak memory → `benchmarks/baseline.json`.
-- Game count via the reader, header spot checks, sampled SAN equality against a ChessBase PGN export, annotation equality on annotated games.
+Recorded 2026-09-27 in `benchmarks/baseline.json` (MacBookPro18,2 / Apple M1 Max / 32 GB /
+macOS 27.0; `cbtool` release build of the pinned ancestor; `CBTOOL_THREADS=1`).
+
+| Flow | Command | Time | Throughput | Peak RSS |
+|---|---|---|---|---|
+| Open + info | `cbtool info 'Mega Database 2025'` | 0.363 s | — | — |
+| Sequential decode + replay | `cbtool verify 'Mega Database 2025'` | 48.09 s | **231,891 records/s** | 12.5 MiB |
+| PGN export | `cbtool pgn 'Mega Database 2025' --out /dev/null` | 119.42 s | **93,377 records/s** | 76.3 MiB |
+
+Numbers reported by the runs: records 11,151,119; games 11,149,379; guiding texts 1,740;
+Chess960 892; set-up starts 2,147; main-line plies 869,502,065; all plies 883,141,297;
+null moves 2,975; en passant 600,106; promotion captures 79,114 (73,381 where the
+captured piece differs from the promoted one); annotated games 303,674.
+
+**Failures:** 9 of 11,151,119 records (exit code 1). They are listed in
+`benchmarks/baseline.json`; they include two games in an unsupported encoding mode (1),
+one Chess960 game without a start position, one annotation record out of range, one
+move "no Queen number 2", three games with annotations but no moves, and one Unterminated
+move tree. Our implementation must decode every other game and report these the same way
+(or better); the budget for task 6.4 is: at most these 9, never a panic.
+
+Reproduce with the same tool build and machine; the asset hashes are in
+`benchmarks/baseline.json`.
+
+### Still pending from the design's Phase 0 list
+
+- Sampled SAN equality against a ChessBase PGN export of real games (needs an export the
+  owner generates; task 3.5's local-only test).
+- Annotation equality on annotated games against the same export (task 4.2).
+
 
 ## Local test-asset inventory (task 0.8)
 

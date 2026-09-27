@@ -1,0 +1,15 @@
+[package]
+name = "cbh-chess"
+description = "The gigachess bridge: move-token decode to moves2, replay validation and keys"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+cbh-format.workspace = true
+gigachess.workspace = true
+
+[lints]
+workspace = true

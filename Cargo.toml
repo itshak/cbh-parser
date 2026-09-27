@@ -1,0 +1,30 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+rust-version = "1.88"
+repository = "https://github.com/itshak/cbh-parser"
+
+[workspace.dependencies]
+gigachess = "0.1.2"
+cbh-format = { version = "0.1.0", path = "crates/cbh-format" }
+cbh-chess = { version = "0.1.0", path = "crates/cbh-chess" }
+cbh-parser = { version = "0.1.0", path = "crates/cbh-parser" }
+
+[workspace.lints.rust]
+missing_docs = "warn"
+unsafe_code = "warn"
+rust_2018_idioms = "warn"
+
+[workspace.lints.clippy]
+all = "warn"
+dbg_macro = "warn"
+todo = "warn"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

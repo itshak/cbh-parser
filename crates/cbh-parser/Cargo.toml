@@ -1,0 +1,15 @@
+[package]
+name = "cbh-parser"
+description = "Read ChessBase databases as moves2 streams: Database, GameIter, PGN writer, archives"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+cbh-format.workspace = true
+cbh-chess.workspace = true
+
+[lints]
+workspace = true

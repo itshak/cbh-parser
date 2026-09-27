@@ -1,0 +1,104 @@
+{
+  "schema": 1,
+  "recorded": "2026-09-27",
+  "task": "bootstrap-cbh-parser 0.4",
+  "machine": {
+    "model": "MacBookPro18,2",
+    "cpu": "Apple M1 Max",
+    "memory_bytes": 34359738368,
+    "os": "macOS 27.0 (build 26A428)",
+    "storage": "internal SSD"
+  },
+  "tool": {
+    "name": "cbtool",
+    "ancestor": "oschess-cb-bridge@ca9e8f8e4389edd6430f02a14b33ff53552bcadc",
+    "build": "release (lto=thin, codegen-units=1)",
+    "threads": 1,
+    "note": "CBTOOL_THREADS=1; upstream defaults to one thread per CPU"
+  },
+  "database": {
+    "env": "CBH_TEST_DB",
+    "base": "Mega Database 2025/Mega Database 2025",
+    "generation": "classic (.cbh family)",
+    "records": 11151119,
+    "record_math": "(512,951,520 - 46) / 46 = 11,151,119",
+    "sizes_bytes": {
+      "cbh": 512951520,
+      "cbg": 1253435766,
+      "cbj": 1338134312,
+      "cba": 209593761,
+      "cko": 57317840,
+      "cpo": 5456388
+    },
+    "sha256": {
+      "cbh": "8f76413bb72f7c959940fb445fbb81857ca8bbcaf093e86a2b9e4d7e29d11bc5",
+      "cbg": "d476bd41d270c5c4f6fbafa813b5427fea12fdee12464df05bd01c4cc48350f8",
+      "cbj": "3d74cb926bcd02b971634ec2b9b81748805dea7cfeb8c9b56ee01634d40e886b",
+      "cko": "5b16082364f3bd502e9c409e7b37567dfcbc369dc619c19c5159683ec22624a5",
+      "cpo": "2629f9b1e4f05e3d36de085a9d671d5d8e79745220f2daff9b4782b5150e7142"
+    }
+  },
+  "measurements": {
+    "info_open": {
+      "command": "cbtool info 'Mega Database 2025'",
+      "seconds": 0.363,
+      "reported": {
+        "records": 11151119,
+        "players": 463262,
+        "tournaments": 105350,
+        "annotators": 2480,
+        "sources": 479
+      }
+    },
+    "sequential_decode": {
+      "command": "CBTOOL_THREADS=1 cbtool verify 'Mega Database 2025'",
+      "seconds": 48.09,
+      "records_per_second": 231891,
+      "peak_rss_bytes": 13156352,
+      "reported": {
+        "games": 11149379,
+        "guiding_texts": 1740,
+        "analyses": 0,
+        "deleted": 0,
+        "chess960": 892,
+        "setup_positions": 2147,
+        "main_line_plies": 869502065,
+        "all_plies": 883141297,
+        "null_moves": 2975,
+        "en_passant": 600106,
+        "promotion_captures": 79114,
+        "annotated_games": 303674,
+        "failures": 9
+      }
+    },
+    "pgn_export": {
+      "command": "CBTOOL_THREADS=1 cbtool pgn 'Mega Database 2025' --out /dev/null",
+      "seconds": 119.42,
+      "records_per_second": 93377,
+      "peak_rss_bytes": 80052224,
+      "bytes_written": "discarded (--out /dev/null)"
+    }
+  },
+  "failures": {
+    "count": 9,
+    "exit_code": 1,
+    "items": [
+      "game 489834: format error: move record: Chess960 game without a start position",
+      "game 2455498: annotations: format error: classic annotations of game 2455498 at byte 49: annotation size out of range",
+      "game 3079389: format error: move 108: no Queen number 2",
+      "game 3079410: format error: encoding mode 1 is not supported",
+      "game 5614728: annotations: format error: annotations at position 0, in a game without moves",
+      "game 5614732: annotations: format error: annotations at position 0, in a game without moves",
+      "game 5614734: annotations: format error: annotations at position 0, in a game without moves",
+      "game 7168922: format error: move stream: tree not terminated",
+      "game 8076798: format error: encoding mode 1 is not supported"
+    ],
+    "note": "The upstream baseline fails 9 of 11,151,119 records; our verify's error report must cover at least the same games (task 6.4) and remaining games must keep decoding."
+  },
+  "budgets_from_design": {
+    "index_open_ms_for_10m_games": 50,
+    "sequential_decode_vs_upstream": "not slower",
+    "pgn_export_vs_upstream": "within 1.2x",
+    "peak_memory": "bounded by caller buffers; upstream baselines above"
+  }
+}
