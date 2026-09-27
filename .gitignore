@@ -28,3 +28,21 @@
 
 # Generated fixtures may be committed under their pytest-style directory
 !/tests/fixtures/generated/**
+
+# Local test material: the owner's Mega Database 2025 set (never committed)
+/Mega Database 2025/
+*.cbtt
+*.cbgi
+*.cko
+*.cpo
+*.flags
+*.cbb
+*.cit
+*.cib
+*.cit2
+*.cib2
+*.cbini
+*.accelerator
+*.acceleratori
+*.pattern
+*.patterni

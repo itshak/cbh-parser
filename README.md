@@ -1,6 +1,6 @@
 # cbh-parser
 
-A fast, MIT-licensed Rust library and CLI for reading ChessBase databases: the classic **`.cbh` family** (`.cbh .cbg .cba .cbp .cbt .cbc .cbs .cbj .cbe .cbl` plus boosters) and the **2CBH family** (`.2cbh .2cbg .2cba .2lid .2lgd .2lcd`), as well as **`.cbv` / `.cbz` archive containers** — with `gigachess` as the one and only chess core.
+A fast, MIT-licensed Rust library and CLI for reading ChessBase databases: the classic **`.cbh` family** (`.cbh .cbg .cba .cbp .cbt .cbc .cbs .cbj .cbe .cbl .cbm .cbtt`, metadata `.flags`, boosters `.cit/.cib/.cit2/.cib2/.cbb/.cbgi`) and the **2CBH family** (`.2cbh .2cbg .2cba .2lid .2lgd .2lcd`), as well as **`.cbv` / `.cbz` archive containers** — with `gigachess` as the one and only chess core. Derived accelerator files (`.cko`, `.cpo`) and the `.patterns/` / `.accelerators/` folders are recognized and ignored in v1; CBONE and CBCloud are out of scope.
 
 > **Status: scaffolded.** The first change, `bootstrap-cbh-parser` (in `openspec/changes/`), defines the full plan: deep research, the port of `cbformat` onto `gigachess`, clean-room `.cbv`/`.cbz`, fixtures and benchmarks. Nothing is implemented yet.
 
@@ -15,7 +15,7 @@ The on-disk format knowledge comes from a **port of `cbformat`** (MIT, from the 
 ## Roadmap
 
 1. `bootstrap-cbh-parser` — research, port design, provenance ledger, fixtures, benchmarks, crate skeleton.
-2. Index and metadata readers (`.cbh`, `.cbp`, `.cbt`, `.cbc`, `.cbs`, `.cbj`, `.flags`).
+2. Index and metadata readers (`.cbh`, `.cbp`, `.cbt`, `.cbc`, `.cbs`, `.cbe`, `.cbl`, `.cbtt`, `.cbj`, `.flags`).
 3. Game decoding (`.cbg`) onto `moves2`, annotations (`.cba`).
 4. `.cbv`/`.cbz` containers; 2CBH (`.2cbh` family).
 5. BlindBase façade (reference databases, `.bbdb` conversion, position-index feed).

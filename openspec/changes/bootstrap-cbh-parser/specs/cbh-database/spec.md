@@ -8,7 +8,7 @@ Define what `cbh-parser` must do: read ChessBase databases (classic `.cbh` famil
 
 ### Requirement: Database sets are opened and validated
 
-The library SHALL open a ChessBase database from its base name or any member file and MUST validate the file set before decoding: identify the format generation (classic or 2CBH), check header magic and version fields, and report missing optional files as warnings while requiring the mandatory set (`.cbh .cbg .cba .cbp .cbt .cbc .cbs`).
+The library SHALL open a ChessBase database from its base name or any member file and MUST validate the file set before decoding: identify the format generation (classic or 2CBH), check header magic and version fields, and report missing optional files as warnings while requiring the mandatory set (`.cbh .cbg .cba .cbp .cbt .cbc .cbs`). Optional members (`.cbj .cbe .cbl .cbtt .flags .cbgi .cbb .cko .cpo` and asset folders) SHALL be tolerated as absent, and derived search boosters or accelerators MUST NOT be required for decoding.
 
 #### Scenario: Classic database
 
@@ -26,6 +26,12 @@ The library SHALL open a ChessBase database from its base name or any member fil
 
 - **WHEN** the `.cbh` header magic does not match the documented values
 - **THEN** opening fails with `Corrupt`, naming the file and offset, without panicking.
+
+#### Scenario: Derived files present or absent
+
+- **WHEN** a classic set is opened with or without derived files (`.cbgi`, `.cbb`, `.cko`, `.cpo`, `.patterns/`, `.accelerators/`)
+- **THEN** the reported game count and the decoded games are identical in both cases
+- **AND** derived files appear as present or absent in `info`, never as errors.
 
 ### Requirement: Game headers decode to a stable record type
 
@@ -145,5 +151,5 @@ Every parser entry point SHALL return typed errors; `unsafe` code requires a jus
 
 ## Unknowns
 
-Byte-level gaps that Phase 0 must close against real databases are listed in `SPEC.md` (created by task 0.5) and mirrored in the change design; this specification states only facts verified from the referenced sources.
+Byte-level gaps that Phase 0 must close against real databases are listed in `SPEC.md` (created by task 0.5) and mirrored in the change design; this specification states only facts verified from the referenced sources. The Mega Database 2025 asset validation of 2026-09-27 is recorded in `docs/research/01-real-database-report.md` (local-only).
 
