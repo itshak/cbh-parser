@@ -35,8 +35,8 @@
 
 ## 7. Deferred (optional, and the close-out)
 
-- [ ] 7.1 Optional and gated: single-copy movetext (SAN written during the walk, `sans` dropped) — attempt only if 5.4 is met, drop on any gold-diff regression. Verify: gold harness unchanged, or the attempt reverted.
-- [ ] 7.2 Update `docs/port-inventory.md` / `docs/provenance.md` for the new public APIs and the gigachess `startpos_cached` request, then run `openspec validate pgn-export-sota-performance --strict`, `cargo fmt --check`, `cargo clippy --workspace --all-targets` and `cargo test --workspace`. Verify: all four pass and the change validates.
+- [ ] 7.1 Optional and gated: single-copy movetext (SAN written during the walk, `sans` dropped). **Deferred, deliberately**: after the ply-cost work the SAN copy is a much smaller share of the export, the change reorders the tree emission, and it wants a re-measurement on an idle machine. Everything it would win is already documented in `benchmarks/baseline.json` as `profile_after` (`memmove` ~9.5 % of a 138 s run, i.e. ~13 s of headroom). — attempt only if 5.4 is met, drop on any gold-diff regression. Verify: gold harness unchanged, or the attempt reverted.
+- [x] 7.2 Update `docs/port-inventory.md` / `docs/provenance.md` for the new public APIs (`NameBuf`, `player_into`/`tournament_into`, `StartCache`/`standard_board`, `MoveSink::wants_checkers`, `pgn::export_parallel`/`export_range`) and record the `gigachess` 0.1.5 dependency and the `standard_board` seam. Then `openspec validate pgn-export-sota-performance --strict`, `cargo fmt --check`, `cargo clippy --workspace --all-targets` and `cargo test --workspace`. Verify: all four pass and the change validates. **Done** — the `gigachess` `startpos_cached` request is no longer outstanding: gigachess 0.1.5 answered the SAN half of it, and the `Board::startpos()` half is now `cbh_chess::start::standard_board` here rather than an upstream change.
 
 ## 6. The ply-cost work (after `gigachess` 0.1.5)
 
