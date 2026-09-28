@@ -127,7 +127,7 @@ fn main() {
 
 #[allow(clippy::too_many_lines)]
 fn run(base: &Path, pgn_out: Option<PathBuf>, sample_out: Option<PathBuf>, decode_only: bool, threads: Option<usize>) {
-    if decode_only && threads.is_some_and(|t| t != 1) {
+    if decode_only {
         let t = threads.unwrap_or(0);
         let t0 = Instant::now();
         let (stats, failures) = cbh_parser::replay::verify_parallel(base, t, 8192, 50).expect("verify parallel");

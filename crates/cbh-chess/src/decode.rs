@@ -170,6 +170,7 @@ impl<S: MoveSink> Walker<'_, S> {
     }
 
     /// Plays one move (`NULL_MOVE` is a null move); `code` names it in errors.
+    #[inline(always)]
     fn play(&mut self, mv: u16, code: u16) -> Result<()> {
         let saved = self.branch_next.then_some((self.board, self.pieces));
         self.branch_next = false;
@@ -232,14 +233,11 @@ impl<S: MoveSink> Walker<'_, S> {
 
     /// The move from ChessBase square `from` by `delta`, each coordinate
     /// taken modulo 8.
+    #[inline(always)]
     fn step(&self, from: u8, delta: (i8, i8), promotion: Option<Role>) -> Move {
-        let x = (from / 8) as i8 + delta.0;
-        let y = (from % 8) as i8 + delta.1;
-        Move::new(
-            Square(from_cb_square(from)),
-            Square::from_coords(x.rem_euclid(8) as u8, y.rem_euclid(8) as u8),
-            promotion,
-        )
+        let x = ((from / 8) as i8 + delta.0) & 7;
+        let y = ((from % 8) as i8 + delta.1) & 7;
+        Move::new(Square(from_cb_square(from)), Square::from_coords(x as u8, y as u8), promotion)
     }
 
     /// A move given by its squares, as the two-byte and simple forms give it.
@@ -248,6 +246,7 @@ impl<S: MoveSink> Walker<'_, S> {
     /// king's destination, `g1` `c1` `g8` `c8` for the side to move, as both
     /// squares; in any other game the king's move from `e1` or `e8` to the
     /// `g` or `c` square of the same rank.
+    #[inline(always)]
     fn by_squares(&self, v: u16, chess960: bool) -> Result<u16> {
         let (from, to) = ((v & 63) as u8, (v >> 6 & 63) as u8);
         let (from_sq, to_sq) = (Square(from_cb_square(from)), Square(from_cb_square(to)));
@@ -277,9 +276,10 @@ impl<S: MoveSink> Walker<'_, S> {
     /// `mv` as a move other than castling. One onto a piece of the side to
     /// move is refused here: `gigachess` reads a king onto its own rook as
     /// castling, which only the castling encodings may name.
+    #[inline(always)]
     fn ordinary(&self, mv: Move, word: u16) -> Result<u16> {
         let us = self.board.turn();
-        if self.board.piece_at(mv.to()).is_some_and(|p| p.color == us) {
+        if self.board.occ_color(us) & (1u64 << mv.to().index()) != 0 {
             return Err(self.fail(format!(
                 "the move {}-{} lands on a piece of the side to move (word {word:#06x})",
                 square_text(mv.from()),
@@ -290,6 +290,7 @@ impl<S: MoveSink> Walker<'_, S> {
     }
 
     /// A one-byte compact code other than the markers.
+    #[inline(always)]
     fn by_code(&self, code: u8) -> Result<u16> {
         const KING: [(i8, i8); 8] = [(0, 1), (1, 1), (1, 0), (1, -1), (0, -1), (-1, -1), (-1, 0), (-1, 1)];
         const KNIGHT: [(i8, i8); 8] = [(2, 1), (1, 2), (-1, 2), (-2, 1), (-2, -1), (-1, -2), (1, -2), (2, -1)];
@@ -478,8 +479,14 @@ fn run(
 ) -> (Result<TreeStats>, Option<(Color, bool)>) {
     let setup = || -> Result<(&'static [u8; 256], bool, bool, Board, Pieces)> {
         let (table, pre, simple) = mode(game.mode())?;
-        let board = start_board(start)?;
-        let pieces = Pieces::scan(&board)?;
+        let (board, pieces) = match start {
+            Start::Standard => (Board::startpos(), Pieces::standard()),
+            _ => {
+                let b = start_board(start)?;
+                let p = Pieces::scan(&b)?;
+                (b, p)
+            }
+        };
         Ok((table, pre, simple, board, pieces))
     };
     let (table, pre, simple, board, pieces) = match setup() {

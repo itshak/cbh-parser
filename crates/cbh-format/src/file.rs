@@ -1,8 +1,11 @@
-//! Database files read at positions, never mapped in memory.
+//! Database files read at positions, memory-mapped when the `mmap` feature is
+//! on for zero-copy reads, with positional reads as the fallback.
 //!
 //! Ported from `cbformat` in `oschess-cb-bridge` @ `ca9e8f8e` (MIT); modified by
 //! cbh-parser: short reads report the typed [`Error::Truncated`] with file and
-//! offset instead of a bare I/O error. See `docs/provenance.md`.
+//! offset instead of a bare I/O error, and the `mmap` feature (original
+//! cbh-parser code, `memmap2`) serves `read_into`/`read` from the page cache.
+//! See `docs/provenance.md`.
 
 use std::fs::File;
 use std::path::{Path, PathBuf};
@@ -29,18 +32,67 @@ pub struct DbFile {
     /// and leave it here for the next read.
     #[cfg(windows)]
     spare: Box<Mutex<Vec<File>>>,
+    #[cfg(feature = "mmap")]
+    mmap: Option<memmap2::Mmap>,
 }
 
 impl DbFile {
     /// Opens `path` for reading.
     pub fn open(path: PathBuf) -> Result<DbFile> {
         let file = File::open(&path).map_err(|source| Error::Io { path: path.clone(), source })?;
+        #[cfg(feature = "mmap")]
+        // SAFETY: the file is opened read-only and the mapping is read-only;
+        // `memmap2` upholds the slice's invariants for the file's lifetime,
+        // which `DbFile` owns. Databases are never written (BYOD contract).
+        #[allow(unsafe_code)]
+        let mmap = unsafe {
+            let m = memmap2::MmapOptions::new().map(&file).ok();
+            if let Some(ref mmap) = m {
+                let _ = mmap.advise(memmap2::Advice::Sequential);
+            }
+            m
+        };
         Ok(DbFile {
             file,
             path: path.into_boxed_path(),
             #[cfg(windows)]
             spare: Box::default(),
+            #[cfg(feature = "mmap")]
+            mmap,
         })
+    }
+
+    /// Opens `path` strictly without memory mapping.
+    pub fn open_unmapped(path: PathBuf) -> Result<DbFile> {
+        let file = File::open(&path).map_err(|source| Error::Io { path: path.clone(), source })?;
+        Ok(DbFile {
+            file,
+            path: path.into_boxed_path(),
+            #[cfg(windows)]
+            spare: Box::default(),
+            #[cfg(feature = "mmap")]
+            mmap: None,
+        })
+    }
+
+    /// Direct zero-copy slice of the memory-mapped file if available.
+    pub fn as_slice(&self) -> Option<&[u8]> {
+        #[cfg(feature = "mmap")]
+        {
+            self.mmap.as_deref()
+        }
+        #[cfg(not(feature = "mmap"))]
+        {
+            None
+        }
+    }
+
+    /// Borrows a slice of `len` bytes starting at `offset` if memory mapped.
+    pub fn slice_at(&self, offset: u64, len: usize) -> Option<&[u8]> {
+        let slice = self.as_slice()?;
+        let start = usize::try_from(offset).ok()?;
+        let end = start.checked_add(len)?;
+        slice.get(start..end)
     }
 
     /// The file's size in bytes.
@@ -61,6 +113,10 @@ impl DbFile {
     /// Fills `buf` from `offset`; a file too short for the request is
     /// [`Error::Truncated`] with the offset and the sizes.
     pub fn read_into(&self, offset: u64, buf: &mut [u8]) -> Result<()> {
+        if let Some(slice) = self.slice_at(offset, buf.len()) {
+            buf.copy_from_slice(slice);
+            return Ok(());
+        }
         let read = self.with_handle(|file| read_exact_at(file, buf, offset));
         match read {
             Ok(()) => Ok(()),
@@ -75,6 +131,9 @@ impl DbFile {
 
     /// `len` bytes from `offset`. Callers bound `len` first.
     pub fn read(&self, offset: u64, len: usize) -> Result<Vec<u8>> {
+        if let Some(slice) = self.slice_at(offset, len) {
+            return Ok(slice.to_vec());
+        }
         let mut buf = vec![0; len];
         self.read_into(offset, &mut buf)?;
         Ok(buf)

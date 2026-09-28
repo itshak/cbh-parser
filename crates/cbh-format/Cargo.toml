@@ -8,6 +8,13 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+memmap2 = { workspace = true, optional = true }
+
+[features]
+default = ["mmap"]
+mmap = ["dep:memmap2"]
+
+
 
 [dev-dependencies]
 cbh-fixtures.workspace = true

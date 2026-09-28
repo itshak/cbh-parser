@@ -219,5 +219,50 @@
       },
       "verdict": "Multi-threaded replay reaches 1.53M rec/s (7.3 s for 11.15M games and 883M plies) - beating upstream by 7.3x"
     }
+  },
+  "maximum_single_thread_decode": {
+    "recorded": "2026-09-28",
+    "change": "maximum-single-thread-decode",
+    "machine": "MacBookPro18,2 (Apple M1 Max, 10 cores, 32 GB RAM)",
+    "optimizations": [
+      "Zero-copy GameHeaderRef borrowed views over batch header bytes (no 46-byte struct copies)",
+      "Zero-copy memory-mapped .cbh/.cbg reads via memmap2 with MADV_SEQUENTIAL (mmap feature, default on)",
+      "Batch header bytes borrowed directly from the mapped .cbh instead of an allocated buffer",
+      "Inlined hot paths: Pieces, Walker::play, by_code, by_squares, step, ordinary, GameMoves::parse",
+      "Bitboard-based MoveCounter sink (no piece_at scans per ply)",
+      "Pre-computed Pieces::standard() and Start::Standard fast path (skips scan and start_as_played)",
+      "Fat LTO + panic=abort release profile"
+    ],
+    "sequential_batch_decode": {
+      "command": "cbh verify 'Mega Database 2025' --threads 1",
+      "seconds": 43.1,
+      "records_per_second": 258939,
+      "all_plies": 883141297,
+      "plies_per_second": 20490517,
+      "reported": {
+        "games": 11149379,
+        "guiding_texts": 1740,
+        "unknown_kind": 0,
+        "deleted": 0,
+        "chess960": 892,
+        "setup_positions": 2147,
+        "main_line_plies": 869502065,
+        "all_plies": 883141297,
+        "null_moves": 2975,
+        "en_passant": 600106,
+        "promotion_captures": 79114,
+        "annotated_games": 303675,
+        "failures": 5
+      },
+      "verdict": "Single-thread throughput 258,939 rec/s (best of two runs: 253,500 and 258,939) exceeds the 250,000 rec/s spec budget and upstream cbtool verify by 24% (258,939 vs 209,357 rec/s); 100% counter parity on 883,141,297 plies"
+    },
+    "parallel_batch_decode": {
+      "command": "cbh verify 'Mega Database 2025' --threads 10",
+      "seconds": 6.6,
+      "records_per_second": 1681548,
+      "all_plies": 883141297,
+      "plies_per_second": 133809287,
+      "verdict": "Multi-threaded replay reaches 1.60M-1.68M rec/s across runs (6.6-7.0 s for 11.15M games and 883M plies) - beating upstream by 8x"
+    }
   }
 }

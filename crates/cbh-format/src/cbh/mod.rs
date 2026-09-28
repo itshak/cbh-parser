@@ -31,7 +31,7 @@ pub use batch::Batch;
 pub use entities::{Entities, Entity};
 pub use flags::Flags;
 pub use moves::GameMoves;
-pub use record::{GameHeader, RECORD_SIZE};
+pub use record::{GameHeader, GameHeaderRef, RECORD_SIZE};
 pub use textblocks::TextBlocks;
 pub use texttable::TextTable;
 pub use wide::Wide;
@@ -121,6 +121,11 @@ impl Headers {
     /// The `.cbh` file being read.
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    /// Reference to the underlying [`DbFile`].
+    pub fn db_file(&self) -> &DbFile {
+        &self.file
     }
 
     /// Number of records, including deleted games and guiding texts.

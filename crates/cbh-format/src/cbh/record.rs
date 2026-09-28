@@ -204,6 +204,223 @@ impl Head for GameHeader {
     }
 }
 
+/// A borrowed reference to a 46-byte `.cbh` record.
+///
+/// Implements zero-copy access to fields directly over a byte slice without cloning.
+#[derive(Clone, Copy)]
+pub struct GameHeaderRef<'a> {
+    id: u32,
+    b: &'a [u8; RECORD_SIZE],
+}
+
+impl<'a> GameHeaderRef<'a> {
+    /// Creates a header view for record `id` borrowing `b`.
+    #[inline(always)]
+    pub fn from_bytes(id: u32, b: &'a [u8; RECORD_SIZE]) -> GameHeaderRef<'a> {
+        GameHeaderRef { id, b }
+    }
+
+    /// Converts to an owned `GameHeader`.
+    #[inline(always)]
+    pub fn to_owned(&self) -> GameHeader {
+        GameHeader::from_bytes(self.id, self.b)
+    }
+
+    /// The record's id (1-based; id 0 is the file's own header record).
+    #[inline(always)]
+    pub fn id(&self) -> u32 {
+        self.id
+    }
+
+    /// The record as stored.
+    #[inline(always)]
+    pub fn bytes(&self) -> &'a [u8; RECORD_SIZE] {
+        self.b
+    }
+
+    /// Whether the record is marked deleted.
+    #[inline(always)]
+    pub fn is_deleted(&self) -> bool {
+        self.b[0] & 0x80 != 0
+    }
+
+    /// Games and guiding texts; a record without bit 0 lies past the last
+    /// game and is reported as unknown. The classic format has no analyses.
+    #[inline(always)]
+    pub fn kind(&self) -> RecordKind {
+        match self.b[0] {
+            t if t & 1 == 0 => RecordKind::Unknown(t),
+            t if t & 2 != 0 => RecordKind::Text,
+            _ => RecordKind::Game,
+        }
+    }
+
+    #[inline(always)]
+    fn is_text(&self) -> bool {
+        self.b[0] & 2 != 0
+    }
+
+    /// Offset of the moves (games) or of the text body (guiding texts) in `.cbg`.
+    #[inline(always)]
+    pub fn moves_offset(&self) -> u32 {
+        be_u32(self.b, 0x01)
+    }
+
+    /// Offset of the annotations in `.cba`; 0 when the game has none.
+    #[inline(always)]
+    pub fn annotations_offset(&self) -> u32 {
+        if self.is_text() { 0 } else { be_u32(self.b, 0x05) }
+    }
+
+    /// The white player's entity id (0 for a guiding text).
+    #[inline(always)]
+    pub fn white(&self) -> u32 {
+        if self.is_text() { 0 } else { be_u24(self.b, 0x09) }
+    }
+
+    /// The black player's entity id (0 for a guiding text).
+    #[inline(always)]
+    pub fn black(&self) -> u32 {
+        if self.is_text() { 0 } else { be_u24(self.b, 0x0c) }
+    }
+
+    /// The tournament's entity id.
+    #[inline(always)]
+    pub fn tournament(&self) -> u32 {
+        be_u24(self.b, if self.is_text() { 0x07 } else { 0x0f })
+    }
+
+    /// The annotator's entity id.
+    #[inline(always)]
+    pub fn annotator(&self) -> u32 {
+        be_u24(self.b, if self.is_text() { 0x0d } else { 0x12 })
+    }
+
+    /// The source's entity id.
+    #[inline(always)]
+    pub fn source(&self) -> u32 {
+        be_u24(self.b, if self.is_text() { 0x0a } else { 0x15 })
+    }
+
+    /// The packed date the game was played.
+    #[inline(always)]
+    pub fn played_date(&self) -> Date {
+        Date(if self.is_text() { 0 } else { be_u24(self.b, 0x18) as i32 })
+    }
+
+    /// The game's result.
+    #[inline(always)]
+    pub fn result(&self) -> GameResult {
+        GameResult::from_field(self.b[0x1b])
+    }
+
+    /// The evaluation glyph of an unfinished game (result *line*), else 0.
+    #[inline(always)]
+    pub fn line_evaluation(&self) -> u8 {
+        self.b[0x1c]
+    }
+
+    /// The round number.
+    #[inline(always)]
+    pub fn round(&self) -> u8 {
+        self.b[if self.is_text() { 0x10 } else { 0x1d }]
+    }
+
+    /// The sub-round number within the round.
+    #[inline(always)]
+    pub fn subround(&self) -> u8 {
+        self.b[if self.is_text() { 0x11 } else { 0x1e }]
+    }
+
+    /// White's rating; 0 when unknown.
+    #[inline(always)]
+    pub fn white_elo(&self) -> u16 {
+        be_u16(self.b, 0x1f)
+    }
+
+    /// Black's rating; 0 when unknown.
+    #[inline(always)]
+    pub fn black_elo(&self) -> u16 {
+        be_u16(self.b, 0x21)
+    }
+
+    /// The ECO field: an opening code, a Chess960 start position, or nothing.
+    #[inline(always)]
+    pub fn eco(&self) -> Eco {
+        Eco::from_field(be_u16(self.b, 0x23))
+    }
+
+    /// The medals ChessBase awarded the game.
+    #[inline(always)]
+    pub fn medals(&self) -> u16 {
+        be_u16(self.b, 0x25)
+    }
+
+    /// The record's flags word (purpose of most bits unknown; see `SPEC.md`).
+    #[inline(always)]
+    pub fn flags(&self) -> u32 {
+        be_u32(self.b, if self.is_text() { 0x12 } else { 0x27 })
+    }
+
+    /// Number of moves in the main line, capped at 255.
+    #[inline(always)]
+    pub fn move_count(&self) -> u8 {
+        self.b[0x2d]
+    }
+}
+
+impl<'a> Head for GameHeaderRef<'a> {
+    fn id(&self) -> u32 {
+        GameHeaderRef::id(self)
+    }
+    fn kind(&self) -> RecordKind {
+        GameHeaderRef::kind(self)
+    }
+    fn is_deleted(&self) -> bool {
+        GameHeaderRef::is_deleted(self)
+    }
+    fn white(&self) -> i64 {
+        i64::from(GameHeaderRef::white(self))
+    }
+    fn black(&self) -> i64 {
+        i64::from(GameHeaderRef::black(self))
+    }
+    fn tournament(&self) -> i64 {
+        i64::from(GameHeaderRef::tournament(self))
+    }
+    fn annotator(&self) -> i64 {
+        i64::from(GameHeaderRef::annotator(self))
+    }
+    fn other(&self) -> Option<(i64, i64)> {
+        match GameHeaderRef::kind(self) {
+            RecordKind::Game => None,
+            RecordKind::Text => Some((i64::from(self.id()), i64::from(GameHeaderRef::annotator(self)))),
+            _ => Some((-1, -1)),
+        }
+    }
+    fn result(&self) -> GameResult {
+        GameHeaderRef::result(self)
+    }
+    fn eco(&self) -> Eco {
+        GameHeaderRef::eco(self)
+    }
+    fn played_date(&self) -> Date {
+        GameHeaderRef::played_date(self)
+    }
+    fn round(&self) -> (i32, i32) {
+        (i32::from(GameHeaderRef::round(self)), i32::from(GameHeaderRef::subround(self)))
+    }
+    fn elo(&self) -> (i32, i32) {
+        (i32::from(GameHeaderRef::white_elo(self)), i32::from(GameHeaderRef::black_elo(self)))
+    }
+    fn move_count(&self) -> i32 {
+        i32::from(GameHeaderRef::move_count(self))
+    }
+    fn bytes(&self) -> &[u8] {
+        self.b.as_slice()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -250,6 +467,25 @@ mod tests {
         assert_eq!(r.move_count(), 33);
         assert!(!r.is_deleted());
         assert_eq!(r.annotations_offset(), 0);
+
+        // Test GameHeaderRef parity
+        let r_ref = GameHeaderRef::from_bytes(r.id(), r.bytes().try_into().unwrap());
+        assert_eq!(r_ref.id(), r.id());
+        assert_eq!(r_ref.kind(), r.kind());
+        assert_eq!(r_ref.moves_offset(), r.moves_offset());
+        assert_eq!((r_ref.white(), r_ref.black()), (r.white(), r.black()));
+        assert_eq!(r_ref.played_date().pgn(), r.played_date().pgn());
+        assert_eq!(r_ref.result(), r.result());
+        assert_eq!(r_ref.line_evaluation(), r.line_evaluation());
+        assert_eq!((r_ref.round(), r_ref.subround()), (r.round(), r.subround()));
+        assert_eq!((r_ref.white_elo(), r_ref.black_elo()), (r.white_elo(), r.black_elo()));
+        assert_eq!(r_ref.eco(), r.eco());
+        assert_eq!(r_ref.medals(), r.medals());
+        assert_eq!(r_ref.flags(), r.flags());
+        assert_eq!(r_ref.move_count(), r.move_count());
+        assert_eq!(r_ref.is_deleted(), r.is_deleted());
+        assert_eq!(r_ref.annotations_offset(), r.annotations_offset());
+        assert_eq!(r_ref.to_owned().moves_offset(), r.moves_offset());
     }
 
     #[test]

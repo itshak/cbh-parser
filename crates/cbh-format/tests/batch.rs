@@ -53,3 +53,35 @@ fn test_batch_fallback_on_fragmented_offsets() {
     assert_eq!(empty_batch.len(), 0);
     assert!(empty_batch.is_empty());
 }
+
+#[test]
+fn test_batch_record_ref_and_iter_records() {
+    let db = build_test_db("batch_ref", 10);
+    let headers = Headers::open(&db.base()).unwrap();
+    let cbg = DbFile::open(db.path(".cbg")).unwrap();
+
+    let batch = Batch::open(&headers, &cbg, None, 1, 10).unwrap();
+    assert_eq!(batch.len(), 10);
+
+    let mut count = 0;
+    let mut scratch = Vec::new();
+    for header_ref in batch.iter_records() {
+        count += 1;
+        assert_eq!(header_ref.id(), count);
+        let owned = batch.record(count).unwrap();
+        assert_eq!(header_ref.id(), owned.id());
+        assert_eq!(header_ref.moves_offset(), owned.moves_offset());
+        assert_eq!(header_ref.white(), owned.white());
+        assert_eq!(header_ref.black(), owned.black());
+        assert_eq!(header_ref.move_count(), owned.move_count());
+
+        // Zero-copy move bytes access
+        let cow = batch.move_bytes_ref(&header_ref).unwrap();
+        assert!(matches!(cow, std::borrow::Cow::Borrowed(_)));
+
+        let moves = batch.moves_of_ref(&header_ref, &mut scratch).unwrap();
+        assert_eq!(moves.mode(), 0);
+        assert_eq!(moves.stream(), &[0xaa, 0xbb]);
+    }
+    assert_eq!(count, 10);
+}

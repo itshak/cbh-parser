@@ -73,23 +73,29 @@ struct MoveCounter {
 }
 
 impl MoveSink for MoveCounter {
+    #[inline(always)]
     fn play(&mut self, before: &Board, mv: u16, _main: bool) {
         if mv == NULL_MOVE {
             self.null_moves += 1;
             return;
         }
         let mv = Move::from_word(mv);
-        let moving = before.piece_at(mv.from());
-        let target = before.piece_at(mv.to());
-        let pawn = matches!(moving, Some(p) if p.role == gigachess::Role::Pawn);
-        if pawn && mv.from().file() != mv.to().file() && target.is_none() {
+        let from_bit = 1u64 << mv.from().index();
+        let to_bit = 1u64 << mv.to().index();
+        // One bitboard test instead of a piece scan for the common pawn check.
+        let pawn = before.piece_bb(before.turn(), gigachess::Role::Pawn) & from_bit != 0;
+        if pawn && mv.from().file() != mv.to().file() && before.occupied() & to_bit == 0 {
             self.en_passant += 1;
         }
-        if let (Some(promo), Some(target)) = (mv.promotion(), target)
-            && moving.is_some_and(|m| m.color != target.color)
+        if let Some(promo) = mv.promotion()
+            && before.occupied() & to_bit != 0
+            && before.occ_color(before.turn()) & to_bit == 0
         {
+            // A promotion onto an enemy piece: capture counted when colors differ.
             self.promo_captures += 1;
-            if target.role != promo {
+            if let Some(target) = before.piece_at(mv.to())
+                && target.role != promo
+            {
                 self.promo_captures_distinct += 1;
             }
         }
@@ -134,7 +140,6 @@ pub fn verify_parallel(
 
     let run_chunk = |(first, last): (u32, u32)| -> ReplayStats {
         let mut stats = ReplayStats::default();
-        let mut buf = cbh_chess::tree::MovesBuf::with_capacity(512);
         let mut counting = MoveCounter::default();
         let mut scratch = Vec::new();
 
@@ -147,15 +152,8 @@ pub fn verify_parallel(
             }
         };
 
-        for rec_id in batch.ids() {
-            let header = match batch.record(rec_id) {
-                Ok(h) => h,
-                Err(e) => {
-                    stats.failures += 1;
-                    record_failure(format!("record {rec_id}: {e}"));
-                    continue;
-                }
-            };
+        for header in batch.iter_records() {
+            let rec_id = header.id();
 
             if header.is_deleted() {
                 stats.deleted += 1;
@@ -172,7 +170,7 @@ pub fn verify_parallel(
                 }
             }
 
-            let game = match batch.moves_of(&header, &mut scratch) {
+            let game = match batch.moves_of_ref(&header, &mut scratch) {
                 Ok(g) => g,
                 Err(e) => {
                     stats.failures += 1;
@@ -186,7 +184,26 @@ pub fn verify_parallel(
             }
             let at = u64::from(header.moves_offset());
             let what = GameRef::at(rec_id, at);
-            let start = match start_as_played(what, &game) {
+            let is_setup = game.start_position().is_some();
+            let start = if is_setup {
+                match start_as_played(what, &game) {
+                    Ok(s) => {
+                        if matches!(s, Start::Setup(_)) {
+                            stats.setups += 1;
+                        }
+                        s
+                    }
+                    Err(e) => {
+                        stats.failures += 1;
+                        record_failure(format!("game {rec_id}: {e}"));
+                        continue;
+                    }
+                }
+            } else {
+                Start::Standard
+            };
+
+            let tree_stats: TreeStats = match walk_from(what, &game, &start, &mut counting) {
                 Ok(s) => s,
                 Err(e) => {
                     stats.failures += 1;
@@ -194,42 +211,6 @@ pub fn verify_parallel(
                     continue;
                 }
             };
-            if matches!(start, Start::Setup(_)) {
-                stats.setups += 1;
-            }
-
-            struct Both<'a> {
-                buf: &'a mut cbh_chess::tree::MovesBuf,
-                counter: &'a mut MoveCounter,
-            }
-            impl MoveSink for Both<'_> {
-                fn play(&mut self, board: &Board, mv: u16, main: bool) {
-                    self.counter.play(board, mv, main);
-                    self.buf.play(board, mv, main);
-                }
-                fn played(&mut self, board: &Board) {
-                    self.buf.played(board);
-                }
-                fn branch(&mut self) {
-                    self.buf.branch();
-                }
-                fn resume(&mut self) {
-                    self.buf.resume();
-                }
-            }
-
-            let tree_stats: TreeStats = {
-                let mut both = Both { buf: &mut buf, counter: &mut counting };
-                match walk_from(what, &game, &start, &mut both) {
-                    Ok(s) => s,
-                    Err(e) => {
-                        stats.failures += 1;
-                        record_failure(format!("game {rec_id}: {e}"));
-                        continue;
-                    }
-                }
-            };
-            buf.clear();
             stats.main_plies += u64::from(tree_stats.main_line_plies);
             stats.total_plies += u64::from(tree_stats.total_plies);
             if header.annotations_offset() != 0 {

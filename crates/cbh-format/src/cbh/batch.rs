@@ -8,7 +8,7 @@ use std::ops::RangeInclusive;
 use super::Headers;
 use super::bytes::be_u24;
 use super::moves::GameMoves;
-use super::record::{GameHeader, RECORD_SIZE};
+use super::record::{GameHeader, GameHeaderRef, RECORD_SIZE};
 use super::wide::Wide;
 use crate::error::{Error, Result};
 use crate::file::DbFile;
@@ -24,7 +24,7 @@ pub struct Batch<'a> {
     cbg: &'a DbFile,
     first: u32,
     last: u32,
-    header_bytes: Vec<u8>,
+    header_bytes: Cow<'a, [u8]>,
     span_at: u64,
     span: Vec<u8>,
     wide: Option<&'a Wide>,
@@ -43,7 +43,7 @@ impl<'a> Batch<'a> {
                 cbg,
                 first,
                 last,
-                header_bytes: Vec::new(),
+                header_bytes: Cow::Borrowed(&[]),
                 span_at: 0,
                 span: Vec::new(),
                 wide,
@@ -53,8 +53,16 @@ impl<'a> Batch<'a> {
         // 1 extra record past `last` when available, to bound the last record's move size.
         let upto = last.saturating_add(1).min(total);
         let count = (upto - first + 1) as usize;
-        let mut header_bytes = vec![0u8; count * RECORD_SIZE];
-        headers.read_records(first, upto - first + 1, &mut header_bytes)?;
+        let start_offset = u64::from(first) * RECORD_SIZE as u64;
+        let needed_bytes = count * RECORD_SIZE;
+
+        let header_bytes = if let Some(slice) = headers.db_file().slice_at(start_offset, needed_bytes) {
+            Cow::Borrowed(slice)
+        } else {
+            let mut buf = vec![0u8; needed_bytes];
+            headers.read_records(first, upto - first + 1, &mut buf)?;
+            Cow::Owned(buf)
+        };
 
         // If wide 64-bit offsets are present, `.cbh` 32-bit offsets cannot be trusted for a span.
         if wide.is_some() {
@@ -62,7 +70,7 @@ impl<'a> Batch<'a> {
         }
 
         let offsets: Vec<u64> = header_bytes
-            .as_chunks::<RECORD_SIZE>()
+            .as_chunks::<{ RECORD_SIZE }>()
             .0
             .iter()
             .map(|chunk| u64::from(GameHeader::from_bytes(0, chunk).moves_offset()))
@@ -74,7 +82,7 @@ impl<'a> Batch<'a> {
         let span_end = if upto > last { offsets.last().copied().unwrap_or(file_len) } else { file_len };
         let span_end = span_end.max(offsets.iter().copied().max().unwrap_or(0)).min(file_len);
 
-        let span = if span_end > span_at && (span_end - span_at) <= MAX_BATCH_SPAN {
+        let span = if cbg.as_slice().is_none() && span_end > span_at && (span_end - span_at) <= MAX_BATCH_SPAN {
             cbg.read(span_at, (span_end - span_at) as usize)?
         } else {
             Vec::new()
@@ -100,20 +108,61 @@ impl<'a> Batch<'a> {
 
     /// Returns the header for `id`.
     pub fn record(&self, id: u32) -> Result<GameHeader> {
+        self.record_ref(id).map(|r| r.to_owned()).or_else(|_| self.headers.record(id))
+    }
+
+    /// Returns a zero-copy borrowed `GameHeaderRef` for `id` within this batch.
+    pub fn record_ref(&self, id: u32) -> Result<GameHeaderRef<'_>> {
         if !self.ids().contains(&id) {
-            return self.headers.record(id);
+            return Err(Error::NoSuchGame { id });
         }
         let offset = (id - self.first) as usize * RECORD_SIZE;
         let chunk = &self.header_bytes[offset..offset + RECORD_SIZE];
         let bytes: &[u8; RECORD_SIZE] = chunk.try_into().expect("RECORD_SIZE slice");
-        Ok(GameHeader::from_bytes(id, bytes))
+        Ok(GameHeaderRef::from_bytes(id, bytes))
+    }
+
+    /// Iterates over all headers in this batch as zero-copy borrowed `GameHeaderRef`.
+    pub fn iter_records(&self) -> impl Iterator<Item = GameHeaderRef<'_>> {
+        let first = self.first;
+        let chunks = self.header_bytes[..self.len() * RECORD_SIZE].as_chunks::<{ RECORD_SIZE }>().0;
+        chunks.iter().enumerate().map(move |(idx, chunk)| GameHeaderRef::from_bytes(first + idx as u32, chunk))
     }
 
     /// Returns the raw move bytes for `header`.
     ///
     /// Borrows zero-copy from the batch span buffer when present, otherwise reads from disk.
     pub fn move_bytes(&self, header: &GameHeader) -> Result<Cow<'_, [u8]>> {
-        let (at, _) = self.offsets(header)?;
+        let (at, _) = self.offsets(header.id(), header.moves_offset(), header.annotations_offset())?;
+        self.move_bytes_at(at)
+    }
+
+    /// Returns the raw move bytes for a borrowed `GameHeaderRef`.
+    pub fn move_bytes_ref(&self, header: &GameHeaderRef<'_>) -> Result<Cow<'_, [u8]>> {
+        let (at, _) = self.offsets(header.id(), header.moves_offset(), header.annotations_offset())?;
+        self.move_bytes_at(at)
+    }
+
+    fn move_bytes_at(&self, at: u64) -> Result<Cow<'_, [u8]>> {
+        // Direct zero-copy slice if entire file is memory-mapped.
+        if let Some(mmap_slice) = self.cbg.as_slice() {
+            let start = usize::try_from(at).map_err(|_| Error::corrupt(self.cbg.path(), at, "offset overflow"))?;
+            if at < MIN_FILE_HEADER || start + 4 > mmap_slice.len() {
+                return Err(Error::corrupt(self.cbg.path(), at, "move record offset out of range"));
+            }
+            let size = be_u24(mmap_slice, start + 1) as usize;
+            if size < 4 {
+                return Err(Error::corrupt(
+                    self.cbg.path(),
+                    at,
+                    format!("move record size {size} is smaller than head"),
+                ));
+            }
+            if start + size > mmap_slice.len() {
+                return Err(Error::corrupt(self.cbg.path(), at, "move record runs past end of file"));
+            }
+            return Ok(Cow::Borrowed(&mmap_slice[start..start + size]));
+        }
 
         // Try zero-copy extraction from the contiguous span buffer.
         if !self.span.is_empty()
@@ -156,11 +205,23 @@ impl<'a> Batch<'a> {
         }
     }
 
-    /// Resolves the move and annotation offsets for `header`.
-    fn offsets(&self, header: &GameHeader) -> Result<(u64, u64)> {
-        let short = (header.moves_offset(), header.annotations_offset());
+    /// Parses the move record for a borrowed `GameHeaderRef`.
+    pub fn moves_of_ref<'b>(&'b self, header: &GameHeaderRef<'_>, scratch: &'b mut Vec<u8>) -> Result<GameMoves<'b>> {
+        let cow = self.move_bytes_ref(header)?;
+        match cow {
+            Cow::Borrowed(slice) => GameMoves::parse(self.cbg.path(), slice),
+            Cow::Owned(vec) => {
+                *scratch = vec;
+                GameMoves::parse(self.cbg.path(), scratch.as_slice())
+            }
+        }
+    }
+
+    /// Resolves the move and annotation offsets for `id` and short offsets.
+    fn offsets(&self, id: u32, moves_offset: u32, annotations_offset: u32) -> Result<(u64, u64)> {
+        let short = (moves_offset, annotations_offset);
         match self.wide {
-            Some(w) => w.offsets(header.id(), short),
+            Some(w) => w.offsets(id, short),
             None => Ok((u64::from(short.0), u64::from(short.1))),
         }
     }

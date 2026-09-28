@@ -35,6 +35,7 @@ pub struct GameMoves<'a> {
 
 impl<'a> GameMoves<'a> {
     /// Splits a whole `.cbg` record of `path`, its 4-byte head included.
+    #[inline(always)]
     pub fn parse(path: &Path, record: &'a [u8]) -> Result<Self> {
         let bad = |what: String| Error::corrupt(path, 0, format!("move record: {what}"));
         if record.len() < 4 {
