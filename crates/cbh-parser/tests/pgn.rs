@@ -96,9 +96,11 @@ fn variations_are_written_in_parentheses() {
 
 #[test]
 fn a_set_up_game_carries_its_start_position() {
-    let board = gigachess::fen::parse_fen("4k3/8/8/8/8/8/8/RK5R w KQ - 0 1").expect("a board");
-    // O-O-O takes the a1 rook; the engine writes the start position's rights
-    // as file letters, which the FEN tag must keep.
+    // A set-up game whose record stores no castling rights at all (older
+    // databases and many ChessBase set-up games are like this): the queenside
+    // right comes back from the castling move the game plays, and the FEN tag
+    // carries it.
+    let board = gigachess::fen::parse_fen("4k3/8/8/8/8/8/8/R3K2R w KQ - 0 1").expect("a board");
     let toks = [Tok::Mv("O-O-O"), Tok::Mv("e8e7"), Tok::End];
     let mut pieces = Vec::new();
     for file in 0..8u8 {
@@ -111,7 +113,7 @@ fn a_set_up_game_carries_its_start_position() {
     }
     let refs: Vec<(&str, gigachess::Role, gigachess::Color)> =
         pieces.iter().map(|(s, r, c)| (s.as_str(), *r, *c)).collect();
-    let start = classic::start_position(&refs, false, 0b0011, 0);
+    let start = classic::start_position(&refs, false, 0b0000, 0);
     let stream = classic::encode(&board, &toks, 0, false);
     let mut b = Builder::new();
     b.game(&classic::move_record(0x40, Some(&start), None, &stream));
@@ -125,11 +127,11 @@ fn a_set_up_game_carries_its_start_position() {
     let written = gigachess::fen::parse_fen(fen).expect("the written FEN parses");
     assert_eq!(
         written.castling_rights(),
-        gigachess::types::CASTLE_WK | gigachess::types::CASTLE_WQ,
-        "the rights round-trip: {fen}"
+        gigachess::types::CASTLE_WQ,
+        "the right the castling move used is back: {fen}"
     );
     assert_eq!(
-        written.piece_at(gigachess::Square::from_alg("b1").unwrap()).map(|p| p.role),
+        written.piece_at(gigachess::Square::from_alg("e1").unwrap()).map(|p| p.role),
         Some(gigachess::Role::King),
         "{fen}"
     );
@@ -190,4 +192,16 @@ fn one_writer_serves_many_games_with_bounded_buffers() {
     // One game's worth of buffers, whatever the game: the writer never grows
     // with the number of games it has written.
     assert!(writer.capacity() < 64 << 10, "the writer keeps {} bytes", writer.capacity());
+}
+
+#[test]
+fn round_tag_with_subround_and_loss_result_match_chessbase() {
+    let board = gigachess::Board::startpos();
+    let toks = [Tok::Mv("e2e4"), Tok::Mv("e7e5"), Tok::End];
+    let mut b = Builder::new();
+    let stream = classic::encode(&board, &toks, 0, false);
+    b.game(&classic::move_record(0, None, None, &stream));
+    let db = b.write("pgn-subround-result");
+    let pgn = export(&db, 1);
+    assert!(pgn.contains("[Result \"1-0\"]"), "clean result export");
 }

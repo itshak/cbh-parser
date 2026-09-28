@@ -10,7 +10,10 @@
 //! White, Black, Result) plus our emitted ECO/WhiteElo/BlackElo/SetUp/FEN,
 //! and the full movetext token stream (SAN, `--`, result). Formatting (line
 //! breaks, spacing, trailing `#`/`+`), tag order and ChessBase-only tags
-//! (PlyCount, GameId, ...) are normalized, not compared.
+//! (PlyCount, GameId, ...) are normalized, not compared — as is ChessBase's
+//! `Z0` null-move spelling (mapped to `--`). ChessBase over-disambiguates SAN
+//! (`Nce7` where the twin knight is pinned); such diffs are classified, not
+//! failed. Diffs are reported by category with up to three samples each.
 //!
 //! Usage: `cargo run -p cbh-parser --release --example gold_pgn --
 //! [--limit N] [--out diff.txt]` (defaults: all gold games).
@@ -47,10 +50,7 @@ fn main() {
         Some(p) => Box::new(std::fs::File::create(p).expect("out file")),
         None => Box::new(std::io::stdout()),
     };
-    writeln!(out, "{}", report.summary()).expect("report");
-    for line in report.diffs.iter().take(20) {
-        writeln!(out, "{line}").expect("report");
-    }
+    writeln!(out, "{}", report.text()).expect("report");
 }
 
 /// The gold PGN beside the database stem (`test_games.pgn`).
@@ -65,26 +65,57 @@ fn sibling_pgn(base: &Path) -> PathBuf {
     candidate
 }
 
+/// Samples kept per diff category.
+const SAMPLES_PER_CATEGORY: usize = 3;
+
 struct Report {
     gold_games: usize,
     compared: usize,
     matched: usize,
     skipped_annotated: usize,
     skipped_decode_err: usize,
-    diffs: Vec<String>,
+    /// Diff counts by category: `(category, count, up to N samples)`.
+    counts: Vec<(String, usize, Vec<String>)>,
 }
 
 impl Report {
-    fn summary(&self) -> String {
-        format!(
-            "gold games: {} | in scope: {} (skipped annotated: {}, decode errors: {}) | matched: {} | diffs: {}",
+    fn bump(&mut self, category: &str, sample: String) {
+        match self.counts.iter_mut().find(|(c, _, _)| c == category) {
+            Some((_, n, samples)) => {
+                *n += 1;
+                if samples.len() < SAMPLES_PER_CATEGORY {
+                    samples.push(sample);
+                }
+            }
+            None => self.counts.push((category.to_owned(), 1, vec![sample])),
+        }
+    }
+
+    fn diffs(&self) -> usize {
+        self.counts.iter().map(|(_, n, _)| n).sum()
+    }
+
+    fn text(&self) -> String {
+        let mut text = format!(
+            "gold games: {} | in scope: {} (skipped annotated: {}, decode errors: {}) | matched: {} | diffs: {}\n",
             self.gold_games,
             self.compared,
             self.skipped_annotated,
             self.skipped_decode_err,
             self.matched,
-            self.diffs.len()
-        )
+            self.diffs()
+        );
+        let mut counts = self.counts.iter().collect::<Vec<_>>();
+        counts.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+        for (category, count, samples) in counts {
+            text.push_str(&format!("{count} x {category}\n"));
+            for sample in samples {
+                for line in sample.lines() {
+                    text.push_str(&format!("    {line}\n"));
+                }
+            }
+        }
+        text
     }
 }
 /// A gold game: tag pairs plus movetext tokens (move numbers dropped, SAN
@@ -97,11 +128,18 @@ struct GoldGame {
 }
 
 /// Parses gold games streaming: tag lines grouped with the movetext that
-/// follows. `latin-1` preserves ChessBase's bytes 1:1.
+/// follows. `latin-1` preserves ChessBase's bytes 1:1. The `strip_prefix`
+/// below removes a real U+FEFF character, not the three latin-1 characters
+/// the BOM bytes (EF BB BF) decode to — compare against the char-mapped BOM.
 fn parse_gold(path: &Path, limit: usize) -> Vec<GoldGame> {
     let data = std::fs::read(path).expect("gold pgn");
-    let text: String = data.iter().map(|&b| b as char).collect();
-    let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
+    let text = match std::str::from_utf8(&data) {
+        Ok(s) => s.strip_prefix('\u{feff}').unwrap_or(s).to_owned(),
+        Err(_) => {
+            let s: String = data.iter().map(|&b| b as char).collect();
+            s.strip_prefix("\u{ef}\u{bb}\u{bf}").unwrap_or(&s).to_owned()
+        }
+    };
     let mut games = Vec::new();
     let mut tags: Vec<(String, String)> = Vec::new();
     let mut in_tags = false;
@@ -259,6 +297,52 @@ fn context(tokens: &[&str], at: Option<usize>) -> String {
     tokens[lo..hi].join(" ")
 }
 
+/// The tag keys on which `want` and `got` differ, with a marker for tags
+/// present on only one side.
+fn differing_tag_keys(want: &[(String, String)], got: &[(String, String)]) -> Vec<String> {
+    let mut keys = Vec::new();
+    for (k, v) in want {
+        match got.iter().find(|(k2, _)| k2 == k) {
+            Some((_, v2)) if v2 == v => {}
+            Some(_) => keys.push(format!("{k}(value)")),
+            None => keys.push(format!("{k}(not-in-ours)")),
+        }
+    }
+    for (k, _) in got {
+        if !want.iter().any(|(k2, _)| k2 == k) {
+            keys.push(format!("{k}(not-in-gold)"));
+        }
+    }
+    keys
+}
+
+/// Whether `gold` and `ours` movetexts differ only by ChessBase's
+/// over-disambiguation: extra file/rank qualifiers on SAN moves (`Nce7` for
+/// our `Ne7`). ChessBase disambiguates when a twin merely *attacks* the
+/// square, even when the twin is pinned and the disambiguator is redundant
+/// under the standard (legal-move) rule; every sample checked by hand is such
+/// a case, where our shorter form is the standard one.
+fn movetext_over_disambiguated(gold: &[&str], ours: &[&str]) -> bool {
+    gold.len() == ours.len()
+        && gold.iter().zip(ours).any(|(a, b)| a != b)
+        && gold.iter().zip(ours).all(|(a, b)| a == b || redundant_qualifier(a, b))
+}
+
+/// `gold` is `ours` with one or two file/rank characters inserted after the
+/// piece letter (and nothing else changed).
+fn redundant_qualifier(gold: &str, ours: &str) -> bool {
+    let g: Vec<char> = gold.chars().collect();
+    let o: Vec<char> = ours.chars().collect();
+    if g.len() <= o.len() || g.len() - o.len() > 2 || g[0] != o[0] {
+        return false;
+    }
+    let extra = g.len() - o.len();
+    if !g[1..1 + extra].iter().all(|c| "abcdefgh12345678".contains(*c)) {
+        return false;
+    }
+    g[1 + extra..] == o[1..]
+}
+
 fn run(base: &Path, gold_path: &Path, limit: usize) -> Report {
     let gold = parse_gold(gold_path, limit);
     let headers = Headers::open(base).expect("headers");
@@ -274,7 +358,7 @@ fn run(base: &Path, gold_path: &Path, limit: usize) -> Report {
         matched: 0,
         skipped_annotated: 0,
         skipped_decode_err: 0,
-        diffs: vec![],
+        counts: Vec::new(),
     };
     // Record ids are 1-based and dense; the gold export covers the head of
     // the database in order (no guiding texts in the first 420k records).
@@ -283,7 +367,10 @@ fn run(base: &Path, gold_path: &Path, limit: usize) -> Report {
     while gold_idx < gold.len() {
         let n = headers.read_records(id, 160, &mut header_buf).expect("headers batch");
         if n == 0 {
-            report.diffs.push(format!("database ends at record {id} with {} gold games left", gold.len() - gold_idx));
+            report.bump(
+                "database: gold games left after last record",
+                format!("database ends at record {id} with {} gold games left", gold.len() - gold_idx),
+            );
             break;
         }
         for i in 0..n {
@@ -335,23 +422,30 @@ fn run(base: &Path, gold_path: &Path, limit: usize) -> Report {
             let got_tags = comparable_tags(&ours.tags);
             let want_moves: Vec<&str> = g.tokens.iter().map(String::as_str).collect();
             let got_moves: Vec<&str> = ours.tokens.iter().map(String::as_str).collect();
+            let rid = header.id();
             if want_tags == got_tags && want_moves == got_moves {
                 report.matched += 1;
-            } else if report.diffs.len() < 200 {
-                let rid = header.id();
-                if want_tags != got_tags {
-                    report.diffs.push(format!("game {rid}: tags differ:\n  gold: {want_tags:?}\n  ours: {got_tags:?}"));
+            } else if want_tags != got_tags {
+                let category = format!("tags: {}", differing_tag_keys(&want_tags, &got_tags).join(","));
+                let sample = format!("game {rid}: tags differ:\n  gold: {want_tags:?}\n  ours: {got_tags:?}");
+                report.bump(&category, sample);
+            } else {
+                let over = movetext_over_disambiguated(&want_moves, &got_moves);
+                let category = if over {
+                    "movetext: ChessBase over-disambiguation only".to_owned()
                 } else {
-                    let at = want_moves.iter().zip(got_moves.iter()).position(|(a, b)| a != b);
-                    report.diffs.push(format!(
-                        "game {rid}: movetext differs at token {} ({} vs {} tokens):\n  gold: ...{}\n  ours: ...{}",
-                        at.map(|i| i.to_string()).unwrap_or("len".into()),
-                        want_moves.len(),
-                        got_moves.len(),
-                        context(&want_moves, at),
-                        context(&got_moves, at),
-                    ));
-                }
+                    "movetext: other".to_owned()
+                };
+                let at = want_moves.iter().zip(got_moves.iter()).position(|(a, b)| a != b);
+                let sample = format!(
+                    "game {rid}: movetext differs at token {} ({} vs {} tokens):\n  gold: ...{}\n  ours: ...{}",
+                    at.map(|i| i.to_string()).unwrap_or("len".into()),
+                    want_moves.len(),
+                    got_moves.len(),
+                    context(&want_moves, at),
+                    context(&got_moves, at),
+                );
+                report.bump(&category, sample);
             }
         }
         id += n;

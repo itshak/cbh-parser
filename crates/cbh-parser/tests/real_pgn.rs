@@ -8,7 +8,7 @@ use cbh_format::cbh::moves::GameMoves;
 use cbh_format::cbh::{Entities, GameHeader, Headers};
 use cbh_format::file::DbFile;
 use cbh_format::game::RecordKind;
-use cbh_parser::pgn::PgnWriter;
+use cbh_parser::pgn::{PgnWriter, result_tag};
 use gigachess::Board;
 use gigachess::san::san_to_move;
 
@@ -152,7 +152,7 @@ fn real_games_export_as_replayable_pgn() {
         let pgn = String::from_utf8(out).expect("PGN is UTF-8");
         let head = &pgn[..80.min(pgn.len())];
         assert!(pgn.starts_with("[Event "), "game {id} starts with tags: {head}");
-        assert!(pgn.contains(&format!("[Result \"{}\"]", header.result().pgn())), "game {id}: {head}");
+        assert!(pgn.contains(&format!("[Result \"{}\"]", result_tag(header.result()))), "game {id}: {head}");
         let sans = replay(&pgn);
         if sans.is_empty() {
             empty += 1;

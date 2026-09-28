@@ -18,7 +18,7 @@ use cbh_chess::decode::{GameRef, MoveSink, NULL_MOVE, start_as_played, walk_from
 use cbh_chess::start::{Start, start_board};
 use cbh_format::cbh::{Entities, GameMoves};
 use cbh_format::error::{Error, Result};
-use cbh_format::game::{Head, ROUND_TEXT_BYTES, RecordKind, round_text};
+use cbh_format::game::{GameResult, Head, Player, ROUND_TEXT_BYTES, RecordKind, round_text};
 use gigachess::san::move_to_san;
 use gigachess::{Board, Color, Move};
 
@@ -199,35 +199,34 @@ fn write_tags<H: Head>(out: &mut String, header: &H, entities: &Entities, start:
         Some(id) => entities.tournament(id)?.unwrap_or_default(),
         None => Default::default(),
     };
-    let player = |v: i64| -> Result<Option<String>> {
+    let player = |v: i64| -> Result<Option<Player>> {
         Ok(match id(v) {
-            Some(id) => entities.player(id)?.map(|p| p.pgn()),
+            Some(id) => entities.player(id)?,
             None => None,
         })
     };
-    let name = |v: Option<String>| v.filter(|s| !s.is_empty()).unwrap_or_else(|| "?".into());
     let title = if tournament.title.is_empty() { "?".to_string() } else { tournament.title.clone() };
     let place = if tournament.place.is_empty() { "?".to_string() } else { tournament.place.clone() };
     let mut round_buf = [0u8; ROUND_TEXT_BYTES];
     let (round, sub) = header.round();
-    let round = round_text(round, sub, &mut round_buf);
+    let round = round_tag(round, sub, &mut round_buf);
 
     let _ = writeln!(out, r#"[Event "{}"]"#, escape(&title));
     let _ = writeln!(out, r#"[Site "{}"]"#, escape(&place));
     let _ = writeln!(out, r#"[Date "{}"]"#, header.played_date().pgn());
-    let _ = writeln!(out, r#"[Round "{}"]"#, if round.is_empty() { "?" } else { round });
-    let _ = writeln!(out, r#"[White "{}"]"#, escape(&name(player(header.white())?)));
-    let _ = writeln!(out, r#"[Black "{}"]"#, escape(&name(player(header.black())?)));
-    let _ = writeln!(out, r#"[Result "{}"]"#, header.result().pgn());
+    let _ = writeln!(out, r#"[Round "{}"]"#, if round.is_empty() { "?" } else { &round });
+    let _ = writeln!(out, r#"[White "{}"]"#, escape(&player_name(player(header.white())?)));
+    let _ = writeln!(out, r#"[Black "{}"]"#, escape(&player_name(player(header.black())?)));
+    let _ = writeln!(out, r#"[Result "{}"]"#, result_tag(header.result()));
+    if let Some(eco) = header.eco().pgn() {
+        let _ = writeln!(out, r#"[ECO "{eco}"]"#);
+    }
     let (white_elo, black_elo) = header.elo();
     if white_elo > 0 {
         let _ = writeln!(out, r#"[WhiteElo "{white_elo}"]"#);
     }
     if black_elo > 0 {
         let _ = writeln!(out, r#"[BlackElo "{black_elo}"]"#);
-    }
-    if let Some(eco) = header.eco().pgn() {
-        let _ = writeln!(out, r#"[ECO "{eco}"]"#);
     }
     if *start != Start::Standard {
         if matches!(start, Start::Chess960(_)) || matches!(start, Start::Setup(s) if s.chess960) {
@@ -240,19 +239,79 @@ fn write_tags<H: Head>(out: &mut String, header: &H, entities: &Entities, start:
     Ok(())
 }
 
-/// The text of a PGN tag value: a quote or a backslash is escaped.
+/// The text of a PGN tag value: a quote or a backslash is escaped, and
+/// ChessBase's figurine codes are written as letters. `None` becomes `?`.
 fn escape(text: &str) -> String {
-    if !text.contains(['"', '\\']) {
+    let has_figurine = text.chars().any(|c| figurine(c).is_some());
+    if !text.contains(['"', '\\']) && !has_figurine {
         return text.to_owned();
     }
     let mut out = String::with_capacity(text.len() + 2);
     for c in text.chars() {
+        if let Some(letter) = figurine(c) {
+            out.push(letter);
+            continue;
+        }
         if c == '"' || c == '\\' {
             out.push('\\');
         }
         out.push(c);
     }
     out
+}
+
+/// The letter of a ChessBase figurine code, if `c` is one. The tournament
+/// titles that record piece odds carry the codes `U+E025`…`U+E029` for
+/// queen, rook, bishop, knight and pawn — `Odds <Q>d1`, `Odds <R>a1+ <N>b1`
+/// — and ChessBase's own PGN export writes them as the letters. `U+E024`
+/// completes the sequence for a king; no title in the local database uses it.
+fn figurine(c: char) -> Option<char> {
+    match c {
+        '\u{e024}' => Some('K'),
+        '\u{e025}' => Some('Q'),
+        '\u{e026}' => Some('R'),
+        '\u{e027}' => Some('B'),
+        '\u{e028}' => Some('N'),
+        '\u{e029}' => Some('P'),
+        _ => None,
+    }
+}
+
+/// A player as ChessBase's export writes the name: `Last, First`, with a
+/// period after a first name that is only initials — one or two letters/digits
+/// (e.g. `Delaire, H.`, `Ward, JH.`, or disambiguated historical players
+/// like `Johnston, A1.`) — and longer first names as stored. `?` when the
+/// record has no name.
+fn player_name(player: Option<Player>) -> String {
+    let Some(player) = player else { return "?".to_owned() };
+    if player.first.is_empty() {
+        return if player.last.is_empty() { "?".to_owned() } else { player.last };
+    }
+    let initials = (1..=2).contains(&player.first.len())
+        && player.first.bytes().all(|b| b.is_ascii_uppercase() || b.is_ascii_digit());
+    format!("{}, {}{}", player.last, player.first, if initials { "." } else { "" })
+}
+
+/// A round and sub-round as ChessBase's export writes them: `5`, `5.2` for
+/// the second game of round 5, or `?.4` when only the sub-round is known.
+fn round_tag(round: i32, sub: i32, buf: &mut [u8; ROUND_TEXT_BYTES]) -> String {
+    if round <= 0 && sub > 0 {
+        return format!("?.{sub}");
+    }
+    let text = round_text(round, sub, buf);
+    match (text.find('('), text.find(')')) {
+        (Some(open), Some(close)) => format!("{}.{}", &text[..open], &text[open + 1..close]),
+        _ => text.to_owned(),
+    }
+}
+
+/// The result as ChessBase's export writes it: `*` where the record has
+/// result 7 (both players lost); `0-0` is no PGN result token.
+pub fn result_tag(result: GameResult) -> &'static str {
+    match result {
+        GameResult::BothLost => "*",
+        other => other.pgn(),
+    }
 }
 
 /// A game's decode error as an I/O error carrying it.
@@ -307,7 +366,7 @@ impl PgnWriter {
         emit(&self.tree, &mut self.movetext);
         out.write_all(self.tags.as_bytes())?;
         out.write_all(self.movetext.as_bytes())?;
-        out.write_all(header.result().pgn().as_bytes())?;
+        out.write_all(result_tag(header.result()).as_bytes())?;
         out.write_all(b"\n\n")
     }
 }
