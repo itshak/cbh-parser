@@ -41,6 +41,18 @@ The container readers (`cbh-format` archive reader, `.cbz` decryption, the
    malformed member tables are covered by our own fixtures (tasks 5.2, 6.3).
 6. **Review gate.** The commit that lands the container reader is reviewed against
    this protocol; ledger rows stay **original** with the facts-sheet reference.
+## Architecture decision records
+
+`openspec/adr/` holds the decisions this tree is held to, each with the numbers
+and the failure that motivated it:
+
+| ADR | Decision |
+|---|---|
+| ADR-001 | Performance is a correctness constraint; the hot path allocates nothing, and an allocator count — not a clock — is the gate |
+| ADR-002 | Measure on the real workload, in process, paired; gate every output-touching change on bytes, and treat a differing byte count as a finding |
+| ADR-003 | A fast primitive that skips a cache a later call trusts is a bug: `play_fast`'s stale `checkers` under-disambiguated five games in eleven million |
+| ADR-004 | The parallel export is byte-identical by construction: id-ordered chunks, private writers, one serial writer stage |
+
 ## Ledger
 
 ### Ported modules (MIT — `cbformat` @ `ca9e8f8e`)

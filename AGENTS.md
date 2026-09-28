@@ -34,9 +34,25 @@
 
 ## Performance rules
 
+Performance is a correctness constraint, not a nicety: a change that slows the
+hot path is a regression even if every other metric improves. `openspec/adr/`
+holds the decisions and the numbers — read ADR-001 (zero-allocation, no
+`core::fmt` in hot loops, borrow what is already mapped, build each board once)
+and ADR-002 (how to measure and what gates a performance change) before touching
+a hot path.
+
 - Zero-allocation hot paths: reuse buffers, stream games, no per-game heap churn, no intermediate strings.
 - FEN/SAN/UCI strings only at output boundaries.
-- Benchmarks before and after every performance change; budgets live in the change's design.
+- Benchmarks before and after every performance change; budgets live in the change's design and in the spec.
+- Measure on the real workload, in process and paired (ADR-002): a Criterion
+  bench against its saved baseline, a whole-database run, and a fresh profile.
+  Report a range when a number repeats within a few per cent.
+- Any change that touches output is gated on bytes: the gold comparison (with
+  its annotation-read and move-decode error counts) and the sequential/parallel
+  byte-equality test. A differing byte count is a finding to chase, not noise
+  (ADR-002, ADR-003).
+- A "fast" primitive that skips a cache some later call trusts is a bug, not a
+  trade (ADR-003): a move sink declares what it needs of the board it is handed.
 - Malformed input must never panic: typed errors, keep parsing what is recoverable.
 
 ## Testing & fixtures
