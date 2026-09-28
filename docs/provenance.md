@@ -49,10 +49,10 @@ State: `planned` until the porting task lands; then `ported`/`ported (chess swap
 
 | Ours | Upstream | Regime | State |
 |---|---|---|---|
-| `cbh-format` — `file`, `codepage` | `file.rs`, `codepage.rs` | port | **ported** (2.1, 2.4) |
+| `cbh-format` — `file`, `codepage` | `file.rs`, `codepage.rs` | port | **ported** (2.1, 2.4); `file` extended with original zero-copy `mmap` reads (`memmap2`, default-on feature) in `maximum-single-thread-decode` |
 | `cbh-format` — `tables` (move-mode byte tables) | `cbh/tables.rs` | port (raw format data; MIT `asdfjkl/cbh2pgn` credit kept) | **ported** (0.6) |
-| `cbh-format` — `cbh::{bytes, record, entities, wide}` | `cbh/{bytes,record,entities,wide}.rs` | port | **ported** (2.1–2.3) |
-| `cbh-format` — `cbh::batch` | `cbh/mod.rs` (batching concepts) | port | **ported** (`fast-decode-and-parallel-replay`) |
+| `cbh-format` — `cbh::{bytes, record, entities, wide}` | `cbh/{bytes,record,entities,wide}.rs` | port | **ported** (2.1–2.3); `record` extended with original zero-copy `GameHeaderRef` in `maximum-single-thread-decode` |
+| `cbh-format` — `cbh::batch` | `cbh/mod.rs` (batching concepts) | port | **ported** (`fast-decode-and-parallel-replay`); extended with original zero-copy header borrowing and mmap span reads in `maximum-single-thread-decode` |
 | `cbh-format` — `cbh::{annotations, text, window}` | `cbh/{annotations,text,window}.rs` | port | planned (3.4–3.5, 4.1) |
 | `cbh-format` — `cbh::moves` (record split, start decode) | `cbh/moves.rs` | port + chess swap (start board via `gigachess`) | planned (3.1, 3.3) |
 | `cbh-format` — `v2::{bytes, record, frame, entities, moves, window, annotations}` | `v2/**` | port | planned (2CBH follow-up change) |
