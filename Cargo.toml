@@ -10,11 +10,13 @@ rust-version = "1.88"
 repository = "https://github.com/itshak/cbh-parser"
 
 [workspace.dependencies]
-gigachess = "0.1.3"
+gigachess = "0.1.4"
 cbh-format = { version = "0.1.0", path = "crates/cbh-format" }
 cbh-chess = { version = "0.1.0", path = "crates/cbh-chess" }
 cbh-parser = { version = "0.1.0", path = "crates/cbh-parser" }
 cbh-fixtures = { version = "0.1.0", path = "crates/cbh-fixtures" }
+rayon = "1.10"
+
 
 [workspace.lints.rust]
 missing_docs = "warn"

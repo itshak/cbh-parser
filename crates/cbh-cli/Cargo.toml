@@ -12,6 +12,7 @@ name = "cbh"
 path = "src/main.rs"
 
 [dependencies]
+cbh-format.workspace = true
 cbh-parser.workspace = true
 
 [lints]

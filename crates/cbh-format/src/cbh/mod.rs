@@ -15,6 +15,8 @@ use std::path::{Path, PathBuf};
 use crate::error::{Error, Result};
 use crate::file::DbFile;
 
+pub mod batch;
+
 pub mod bytes;
 pub mod entities;
 pub mod flags;
@@ -23,6 +25,8 @@ pub mod record;
 pub mod textblocks;
 pub mod texttable;
 pub mod wide;
+
+pub use batch::Batch;
 
 pub use entities::{Entities, Entity};
 pub use flags::Flags;

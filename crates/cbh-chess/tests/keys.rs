@@ -18,6 +18,9 @@ impl MoveSink for Keys {
     }
     fn branch(&mut self) {}
     fn resume(&mut self) {}
+    fn wants_zobrist(&self) -> bool {
+        true
+    }
 }
 
 /// The key of the position `moves` (UCI) reach through the decoder.

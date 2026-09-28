@@ -166,5 +166,58 @@
     },
     "failure_delta": "the 4 missing failures are all upstream annotation-position failures (.cba phase 4, not ported): 2455498 (size out of range), 5614728/5614732/5614734 (annotations at position 0 in games without moves). The 5 move-decode failures match upstream byte-for-byte (489834, 3079389, 3079410, 7168922, 8076798)",
     "san_sample": "14 sampled games (ids 1-2, 2601298-2601308 incl. the Chess960 811 castling games, 2602603, last 2 records): 13/14 main lines identical to cbtool pgn; the one diff (2601298) is our sample emitting the main line only while upstream movetext continues into variations past ply 21"
+  },
+  "fast_decode_and_parallel_replay": {
+    "recorded": "2026-09-28",
+    "change": "fast-decode-and-parallel-replay",
+    "machine": "MacBookPro18,2 (Apple M1 Max, 10 cores, 32 GB RAM)",
+    "sequential_batch_decode": {
+      "command": "cbh verify 'Mega Database 2025' --threads 1",
+      "seconds": 51.9,
+      "records_per_second": 214762,
+      "all_plies": 883141297,
+      "plies_per_second": 17016210,
+      "peak_rss_bytes": 9764864,
+      "reported": {
+        "games": 11149379,
+        "guiding_texts": 1740,
+        "unknown_kind": 0,
+        "deleted": 0,
+        "chess960": 892,
+        "setup_positions": 2147,
+        "main_line_plies": 869502065,
+        "all_plies": 883141297,
+        "null_moves": 2975,
+        "en_passant": 600106,
+        "promotion_captures": 79114,
+        "annotated_games": 303675,
+        "failures": 5
+      },
+      "verdict": "Single-thread throughput beats upstream cbtool verify on identical hardware (214,762 rec/s vs 209,357 rec/s); 100% counter parity"
+    },
+    "parallel_batch_decode": {
+      "command": "cbh verify 'Mega Database 2025' --threads 10",
+      "seconds": 7.30,
+      "records_per_second": 1528491,
+      "all_plies": 883141297,
+      "plies_per_second": 121052739,
+      "peak_rss_bytes": 54689792,
+      "reported": {
+        "games": 11149379,
+        "guiding_texts": 1740,
+        "unknown_kind": 0,
+        "deleted": 0,
+        "chess960": 892,
+        "setup_positions": 2147,
+        "main_line_plies": 869502065,
+        "all_plies": 883141297,
+        "null_moves": 2975,
+        "en_passant": 600106,
+        "promotion_captures": 79114,
+        "annotated_games": 303675,
+        "failures": 5
+      },
+      "verdict": "Multi-threaded replay reaches 1.53M rec/s (7.3 s for 11.15M games and 883M plies) - beating upstream by 7.3x"
+    }
   }
 }

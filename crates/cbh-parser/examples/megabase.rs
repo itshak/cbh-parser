@@ -110,19 +110,62 @@ fn main() {
     let mut pgn_out: Option<PathBuf> = None;
     let mut sample_out: Option<PathBuf> = None;
     let mut decode_only = false;
+    let mut threads: Option<usize> = None;
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--pgn-out" => pgn_out = args.next().map(PathBuf::from),
             "--sample-out" => sample_out = args.next().map(PathBuf::from),
             "--decode-only" => decode_only = true,
+            "--threads" => {
+                threads = args.next().and_then(|s| s.parse().ok());
+            }
             other => base = other.to_string(),
         }
     }
-    run(&PathBuf::from(base), pgn_out, sample_out, decode_only);
+    run(&PathBuf::from(base), pgn_out, sample_out, decode_only, threads);
 }
 
 #[allow(clippy::too_many_lines)]
-fn run(base: &Path, pgn_out: Option<PathBuf>, sample_out: Option<PathBuf>, decode_only: bool) {
+fn run(base: &Path, pgn_out: Option<PathBuf>, sample_out: Option<PathBuf>, decode_only: bool, threads: Option<usize>) {
+    if decode_only && threads.is_some_and(|t| t != 1) {
+        let t = threads.unwrap_or(0);
+        let t0 = Instant::now();
+        let (stats, failures) = cbh_parser::replay::verify_parallel(base, t, 8192, 50).expect("verify parallel");
+        let secs = t0.elapsed().as_secs_f64();
+        let records = stats.games + stats.texts + stats.unknowns;
+        let items = failures.iter().take(50).map(|s| format!("{s:?}")).collect::<Vec<_>>().join(",");
+        println!(
+            concat!(
+                "{{\"records\":{records},\"seconds\":{secs:.2},\"records_per_second\":{rps:.0},",
+                "\"main_line_plies\":{main_plies},\"all_plies\":{total_plies},",
+                "\"plies_per_second\":{pps:.0},\"peak_rss_bytes\":{rss},\"pgn_bytes\":0,",
+                "\"games\":{games},\"guiding_texts\":{texts},\"unknown_kind\":{unknowns},",
+                "\"deleted\":{deleted},\"chess960\":{chess960},\"setup_positions\":{setups},",
+                "\"annotated_games\":{annotated},\"null_moves\":{nulls},\"en_passant\":{ep},",
+                "\"promotion_captures\":{promo},\"failed\":{failed},\"failure_items\":[{items}]}}"
+            ),
+            records = records,
+            secs = secs,
+            rps = records as f64 / secs,
+            main_plies = stats.main_plies,
+            total_plies = stats.total_plies,
+            pps = stats.total_plies as f64 / secs,
+            rss = peak_rss_bytes(),
+            games = stats.games,
+            texts = stats.texts,
+            unknowns = stats.unknowns,
+            deleted = stats.deleted,
+            chess960 = stats.chess960,
+            setups = stats.setups,
+            annotated = stats.annotated,
+            nulls = stats.null_moves,
+            ep = stats.en_passant,
+            promo = stats.promo_captures,
+            failed = failures.len(),
+            items = items,
+        );
+        return;
+    }
     let cbg_path = PathBuf::from(format!("{}.cbg", base.display()));
     let headers = Headers::open(base).expect("headers");
     let entities = Entities::open(base).expect("entities");

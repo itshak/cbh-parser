@@ -52,6 +52,7 @@ State: `planned` until the porting task lands; then `ported`/`ported (chess swap
 | `cbh-format` — `file`, `codepage` | `file.rs`, `codepage.rs` | port | **ported** (2.1, 2.4) |
 | `cbh-format` — `tables` (move-mode byte tables) | `cbh/tables.rs` | port (raw format data; MIT `asdfjkl/cbh2pgn` credit kept) | **ported** (0.6) |
 | `cbh-format` — `cbh::{bytes, record, entities, wide}` | `cbh/{bytes,record,entities,wide}.rs` | port | **ported** (2.1–2.3) |
+| `cbh-format` — `cbh::batch` | `cbh/mod.rs` (batching concepts) | port | **ported** (`fast-decode-and-parallel-replay`) |
 | `cbh-format` — `cbh::{annotations, text, window}` | `cbh/{annotations,text,window}.rs` | port | planned (3.4–3.5, 4.1) |
 | `cbh-format` — `cbh::moves` (record split, start decode) | `cbh/moves.rs` | port + chess swap (start board via `gigachess`) | planned (3.1, 3.3) |
 | `cbh-format` — `v2::{bytes, record, frame, entities, moves, window, annotations}` | `v2/**` | port | planned (2CBH follow-up change) |
@@ -95,6 +96,7 @@ State: `planned` until the porting task lands; then `ported`/`ported (chess swap
 | `cbh-format::cbh::entities` reading of `.cbe` (teams) | The file uses the ancestor's entity-file framing; reading it as the teams namebase is ours (task 2.3) |
 | `cbh-format` — archive reader (`.cbv`, `.cbz`) | Clean-room per the protocol above; facts in `docs/research/00-cbv-facts.md` |
 | `cbh-parser` — `Database`, `GameIter`, `decode_game_into`, archive façade | Task 6.1, 5.3 |
+| `cbh-parser::replay` — `verify_parallel`, Rayon chunk worker | Original (`fast-decode-and-parallel-replay`) |
 | `cbh-cli` — `info`, `verify`, `pgn`, `games`, `archive` | Task 5.3, 6.4 |
 | `cbh-chess` — gigachess bridge helpers (start boards, key alignment) | Task 3.3 |
 | `scripts/oracles/**`, `scripts/fetch-ancestor.sh`, benchmark harness | Tasks 0.4, 0.7, 6.2 |

@@ -7,3 +7,4 @@
 //! `Database::decode_game_into(&mut MovesBuf)` and the PGN writer.
 
 pub mod pgn;
+pub mod replay;

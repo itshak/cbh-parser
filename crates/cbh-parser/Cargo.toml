@@ -11,6 +11,9 @@ rust-version.workspace = true
 cbh-format.workspace = true
 cbh-chess.workspace = true
 gigachess.workspace = true
+rayon.workspace = true
+
+
 
 [dev-dependencies]
 criterion = { version = "0.5", default-features = false }

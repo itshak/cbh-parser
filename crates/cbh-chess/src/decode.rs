@@ -58,6 +58,12 @@ pub trait MoveSink {
     fn stopped(&self) -> bool {
         false
     }
+
+    /// Whether this sink needs incremental Zobrist hashes maintained on `board`.
+    /// When `false` (default), the walker uses `Board::play_fast` for maximum throughput.
+    fn wants_zobrist(&self) -> bool {
+        false
+    }
 }
 
 /// Counts from a full walk of a move tree.
@@ -177,7 +183,12 @@ impl<S: MoveSink> Walker<'_, S> {
             self.sink.play(&self.board, mv.word(), self.main);
             let before = self.board;
             let us = before.turn();
-            if self.board.play(mv).is_err() {
+            let res = if self.sink.wants_zobrist() {
+                self.board.play(mv).map(|_| ())
+            } else {
+                self.board.play_fast(mv).map(|_| ())
+            };
+            if res.is_err() {
                 return Err(self.fail(format!(
                     "illegal move {}-{} (word {code:#06x})",
                     square_text(mv.from()),
