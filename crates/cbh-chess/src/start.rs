@@ -19,7 +19,7 @@ use gigachess::types::{CASTLE_BK, CASTLE_BQ, CASTLE_WK, CASTLE_WQ};
 use gigachess::{Board, Color, Role, Square};
 
 /// Where a game starts.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Start {
     /// The standard position.
     Standard,
@@ -30,11 +30,14 @@ pub enum Start {
 }
 
 /// A set-up start position, decoded from the record's start section.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Setup {
     /// Whether the record is a Chess960 game (modes 10 and 11).
     pub chess960: bool,
-    /// The move number the record states (at least 1).
+    /// The move number the record states, **as stored**: ChessBase's own PGN
+    /// export writes the byte verbatim, so a record holding 0 writes a FEN
+    /// with a fullmove of 0 (odds games and studies in the Mega: 17 of
+    /// 1,526 set-up games; `docs/format-spec.md` §2).
     pub move_number: u16,
     /// The side to move.
     pub side_to_move: Color,
@@ -147,10 +150,12 @@ pub fn decode_start(start: &[u8; 28], chess960: Option<&[u8; 8]>) -> Result<Star
     let side_to_move = if start[1] & 0x10 != 0 { Color::Black } else { Color::White };
     let ep = u16::from(start[1] & 0x0f);
     let castling = start[2] & 0x0f;
-    let move_number = u16::from(start[3]).max(1);
+    let move_number = u16::from(start[3]);
     if let Some(extra) = chess960 {
         let n = u16::from_be_bytes([extra[6], extra[7]]);
-        let untouched = side_to_move == Color::White && castling == 0x0f && ep == 0 && move_number == 1;
+        // A stored 0 counts as untouched here too: the byte is clamped to 1
+        // nowhere since ChessBase writes it verbatim.
+        let untouched = side_to_move == Color::White && castling == 0x0f && ep == 0 && move_number <= 1;
         if untouched && chess960_placement(n).is_some_and(|p| p == board) {
             return Ok(Start::Chess960(n));
         }
@@ -222,7 +227,7 @@ fn decode_board(bits: &[u8]) -> Result<[Option<(Color, Role)>; 64]> {
 /// buffer.
 pub fn start_board(start: &Start) -> Result<Board> {
     match start {
-        Start::Standard => Ok(Board::startpos()),
+        Start::Standard => Ok(standard_board()),
         Start::Chess960(n) => {
             let placement = chess960_placement(*n).ok_or_else(|| bad(&format!("Chess960 position {n}")))?;
             // The rights ride on where the generated placement actually puts
@@ -260,6 +265,65 @@ pub fn start_board(start: &Start) -> Result<Board> {
     }
 }
 
+/// The boards of the starts a caller has already built, so that exporting a
+/// database of millions of games builds its standard board once instead of
+/// parsing a FEN per game — `gigachess`'s `Board::startpos()` parses one, and
+/// a whole-database export spent 2.8 % of its time there. Owned by the caller,
+/// so there is no global state and the type stays `Send`.
+#[derive(Debug, Default)]
+pub struct StartCache {
+    /// The boards of the non-standard starts seen, by the start itself: two
+    /// records that start from the same position share one board.
+    boards: std::collections::HashMap<Start, Board>,
+}
+
+/// The standard board, built once per process: `Board` is `Copy`, so handing
+/// out a copy costs a 128-byte move, while `gigachess`'s `Board::startpos()`
+/// parses a FEN string on every call.
+static STANDARD: std::sync::OnceLock<Board> = std::sync::OnceLock::new();
+
+/// The standard board, built once per process. `gigachess`'s
+/// `Board::startpos()` parses a FEN string on every call, which a walk over
+/// millions of games — and a whole-database export, which starts a board per
+/// game — would pay for every game (`pgn-export-sota-performance` task 4.1).
+#[inline]
+pub fn standard_board() -> Board {
+    *STANDARD.get_or_init(Board::startpos)
+}
+
+impl StartCache {
+    /// An empty cache.
+    #[inline]
+    pub fn new() -> StartCache {
+        StartCache::default()
+    }
+
+    /// The boards the cache holds, for a caller's high-water mark.
+    pub fn len(&self) -> usize {
+        self.boards.len()
+    }
+
+    /// Whether the cache holds no board.
+    pub fn is_empty(&self) -> bool {
+        self.boards.is_empty()
+    }
+}
+
+/// [`start_board`], with the boards this cache has already built: the standard
+/// position comes from a process-wide `OnceLock`, every other start from the
+/// cache. Same boards, same errors, no FEN parsed twice.
+pub fn start_board_cached(start: &Start, cache: &mut StartCache) -> Result<Board> {
+    if let Start::Standard = start {
+        return Ok(standard_board());
+    }
+    if let Some(board) = cache.boards.get(start) {
+        return Ok(*board);
+    }
+    let board = start_board(start)?;
+    cache.boards.insert(start.clone(), board);
+    Ok(board)
+}
+
 /// Builds a set-up position: the placement, the side to move, the castling
 /// rights the position can hold, the en-passant square when it can be used,
 /// and the move number.
@@ -275,6 +339,8 @@ fn setup_board(setup: &Setup, ep_file: Option<u8>) -> Result<Board> {
     fen.byte(b' ');
     fen.number(0);
     fen.byte(b' ');
+    // `gigachess` reads a fullmove from 1; a stored 0 is written only in the
+    // PGN's FEN tag (`pgn::write_tags::fen_tag`), never parsed back.
     fen.number(setup.move_number.max(1));
     let text = fen.text().ok_or_else(|| bad("the position does not fit a FEN"))?;
     parse_fen(text).map_err(|e| bad(&format!("set-up position: {e}")))

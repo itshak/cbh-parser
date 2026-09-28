@@ -21,7 +21,7 @@ use cbh_format::tables;
 use gigachess::{Board, Color, Move, Role, Square};
 
 use super::pieces::{KINDS, Pieces, to_cb};
-use super::start::{Start, decode_start, from_cb_square, start_board};
+use super::start::{Start, decode_start, from_cb_square, standard_board, start_board};
 
 /// Most variations open at once in a game. Each open one keeps a board and the
 /// piece lists (about 250 bytes), so the stack stays under 400 KiB.
@@ -62,6 +62,18 @@ pub trait MoveSink {
     /// Whether this sink needs incremental Zobrist hashes maintained on `board`.
     /// When `false` (default), the walker uses `Board::play_fast` for maximum throughput.
     fn wants_zobrist(&self) -> bool {
+        false
+    }
+
+    /// Whether this sink reads the cached checkers bitboard off the position a
+    /// move leaves behind — which `Board::in_check` is, at O(1), and therefore
+    /// what `gigachess`'s `san::check_mate_suffix` reads.
+    ///
+    /// When `true` the walker makes moves with `Board::play` rather than
+    /// `Board::play_fast`, so the cache is refreshed (+2 ns per make). A sink
+    /// that reads the cache *must* answer `true`; a fast make leaves `checkers`
+    /// stale and a stale cache reads as "not in check".
+    fn wants_checkers(&self) -> bool {
         false
     }
 }
@@ -172,7 +184,12 @@ impl<S: MoveSink> Walker<'_, S> {
     /// Plays one move (`NULL_MOVE` is a null move); `code` names it in errors.
     #[inline(always)]
     fn play(&mut self, mv: u16, code: u16) -> Result<()> {
-        let saved = self.branch_next.then_some((self.board, self.pieces));
+        // `if`, not `bool::then_some`: the tuple is built eagerly, and building
+        // it copies a 144B `Board` plus the piece lists — 883M times over the
+        // reference database, all but a handful discarded. A variation opens on
+        // far less than one ply in a hundred (`pgn-export-sota-performance`
+        // task 6.3).
+        let saved = if self.branch_next { Some((self.board, self.pieces)) } else { None };
         self.branch_next = false;
         if mv == NULL_MOVE {
             // A pass is a move: gigachess flips the side, clears a pending
@@ -184,7 +201,14 @@ impl<S: MoveSink> Walker<'_, S> {
             self.sink.play(&self.board, mv.word(), self.main);
             let before = self.board;
             let us = before.turn();
-            let res = if self.sink.wants_zobrist() {
+            // The walk keeps the cached checkers current when it is the one that
+            // reads them: a `Tree` sink appends the check/mate suffix from the
+            // position the move leaves behind (`gigachess` 0.1.5's
+            // `check_mate_suffix`), and that reads `checkers`, which
+            // `play_fast` leaves stale. `+2 ns` per make buys one whole ply of
+            // SAN work back; a sink that wants the fast make (the replay
+            // verifier, which validates legality and nothing else) keeps it.
+            let res = if self.sink.wants_zobrist() || self.sink.wants_checkers() {
                 self.board.play(mv).map(|_| ())
             } else {
                 self.board.play_fast(mv).map(|_| ())
@@ -480,7 +504,7 @@ fn run(
     let setup = || -> Result<(&'static [u8; 256], bool, bool, Board, Pieces)> {
         let (table, pre, simple) = mode(game.mode())?;
         let (board, pieces) = match start {
-            Start::Standard => (Board::startpos(), Pieces::standard()),
+            Start::Standard => (standard_board(), Pieces::standard()),
             _ => {
                 let b = start_board(start)?;
                 let p = Pieces::scan(&b)?;

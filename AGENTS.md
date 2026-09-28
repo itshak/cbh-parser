@@ -1,10 +1,10 @@
-# AGENTS.md — cbh-parser AI Agent Instructions
+# AGENTS.md — cbvault AI Agent Instructions
 
 > Canonical "README for AI agents". Read this before making any change.
 
 ## Mission
 
-`cbh-parser` reads ChessBase databases (classic `.cbh` family, 2CBH `.2cbh` family, `.cbv`/`.cbz` archives) as a fast, MIT-licensed Rust library and CLI. It is the BYOD foundation for BlindBase: users bring their own databases; nothing is redistributed. **Read-only, always** — this project never writes ChessBase data.
+`cbvault` (formerly `cbh-parser`) reads ChessBase databases (classic `.cbh` family, 2CBH `.2cbh` family, `.cbv`/`.cbz` archives) as a fast, MIT-licensed Rust library and CLI. It is the BYOD foundation for BlindBase: users bring their own databases; nothing is redistributed. **Read-only, always** — this project never writes ChessBase data.
 
 ## Tech stack
 

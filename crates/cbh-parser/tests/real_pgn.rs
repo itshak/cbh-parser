@@ -32,7 +32,13 @@ fn read_record(moves: &DbFile, header: &GameHeader) -> Option<Vec<u8>> {
 /// The board a game starts from: its FEN tag when it has one.
 fn start_of(pgn: &str) -> Board {
     let fen = pgn.lines().find_map(|l| l.strip_prefix("[FEN \"")?.strip_suffix("\"]"));
-    match fen.map(gigachess::fen::parse_fen) {
+    // ChessBase writes the stored move number verbatim; a fullmove of 0 does
+    // not parse, so the tag reads as the board it names.
+    let fixed = fen.map(|f| match f.strip_suffix(" 0") {
+        Some(head) => format!("{head} 1"),
+        None => f.to_owned(),
+    });
+    match fixed.as_deref().map(gigachess::fen::parse_fen) {
         Some(Ok(board)) => board,
         Some(Err(e)) => panic!("the exported FEN does not parse: {e}"),
         None => Board::startpos(),
@@ -148,7 +154,7 @@ fn real_games_export_as_replayable_pgn() {
         let cbg = PathBuf::from(format!("{}.cbg", db.display()));
         let Ok(game) = GameMoves::parse(&cbg, &record) else { continue };
         let mut out = Vec::new();
-        let Ok(()) = writer.write_game(&mut out, &header, &entities, &game) else { continue };
+        let Ok(()) = writer.write_game(&mut out, &header, &entities, &game, None) else { continue };
         let pgn = String::from_utf8(out).expect("PGN is UTF-8");
         let head = &pgn[..80.min(pgn.len())];
         assert!(pgn.starts_with("[Event "), "game {id} starts with tags: {head}");

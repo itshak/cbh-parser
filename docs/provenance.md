@@ -97,6 +97,11 @@ State: `planned` until the porting task lands; then `ported`/`ported (chess swap
 | `cbh-format` — archive reader (`.cbv`, `.cbz`) | Clean-room per the protocol above; facts in `docs/research/00-cbv-facts.md` |
 | `cbh-parser` — `Database`, `GameIter`, `decode_game_into`, archive façade | Task 6.1, 5.3 |
 | `cbh-parser::replay` — `verify_parallel`, Rayon chunk worker | Original (`fast-decode-and-parallel-replay`) |
+| `cbh-parser::pgn::parallel` — `export_parallel` / `export_range`, Rayon export pipeline | Original (`pgn-export-sota-performance`): modelled on our own `replay::verify_parallel`, byte-identical to the sequential writer by construction (id-ordered chunks, one `write_all` per chunk) |
+| `cbh-format::cbh::bytes::NameBuf`, `Entities::player_into` / `tournament_into`, `EntityFile::data_ref` | Original: the mmap-borrowed entity record and the reusable name buffer; the decode rules are `text()`'s, unchanged |
+| `cbh-chess::start::StartCache`, `standard_board`, `start_board_cached` | Original: gigachess parses a FEN in `Board::startpos()`, so the standard board is built once per process and set-up/Chess960 boards are cached per start |
+| `MoveSink::wants_checkers` | Original: the contract that a sink reading the cached `checkers` (as `check_mate_suffix` does) gets a `Board::play` walk rather than the stale-cache `play_fast` |
+| SAN rendering in the writer (`move_to_san_body` + `check_mate_suffix`) | gigachess 0.1.5 (MIT, `itshak/gigachess-rs`); the *split* is upstream's, the ancestor's `write_san_body` / `write_check_suffix` shape was read as a design oracle only — no ancestor code copied |
 | `cbh-cli` — `info`, `verify`, `pgn`, `games`, `archive` | Task 5.3, 6.4 |
 | `cbh-chess` — gigachess bridge helpers (start boards, key alignment) | Task 3.3 |
 | `scripts/oracles/**`, `scripts/fetch-ancestor.sh`, benchmark harness | Tasks 0.4, 0.7, 6.2 |

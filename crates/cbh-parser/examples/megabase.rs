@@ -68,6 +68,11 @@ fn peak_rss_bytes() -> u64 {
     }
     0
 }
+/// The export write buffer: 1 MiB, so the whole-database export issues
+/// thousands of writes instead of the ~1,000,000 that an 8 KiB buffer needs
+/// for 7.6 GB (`pgn-export-sota-performance` task 4.2).
+const PGN_BUFFER: usize = 1 << 20;
+
 fn main_line_sans(game: &GameMoves<'_>) -> Result<String, String> {
     let what = GameRef::new(0);
     let start = start_as_played(what, game).map_err(|e| e.to_string())?;
@@ -108,12 +113,14 @@ fn main() {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../Mega Database 2025/Mega Database 2025").display().to_string()
     });
     let mut pgn_out: Option<PathBuf> = None;
+    let mut pgn_last: u32 = 0;
     let mut sample_out: Option<PathBuf> = None;
     let mut decode_only = false;
     let mut threads: Option<usize> = None;
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--pgn-out" => pgn_out = args.next().map(PathBuf::from),
+            "--pgn-last" => pgn_last = args.next().and_then(|v| v.parse().ok()).unwrap_or(0),
             "--sample-out" => sample_out = args.next().map(PathBuf::from),
             "--decode-only" => decode_only = true,
             "--threads" => {
@@ -122,11 +129,19 @@ fn main() {
             other => base = other.to_string(),
         }
     }
-    run(&PathBuf::from(base), pgn_out, sample_out, decode_only, threads);
+    run(&PathBuf::from(base), pgn_out, sample_out, decode_only, threads, pgn_last);
 }
 
 #[allow(clippy::too_many_lines)]
-fn run(base: &Path, pgn_out: Option<PathBuf>, sample_out: Option<PathBuf>, decode_only: bool, threads: Option<usize>) {
+#[allow(clippy::too_many_arguments)]
+fn run(
+    base: &Path,
+    pgn_out: Option<PathBuf>,
+    sample_out: Option<PathBuf>,
+    decode_only: bool,
+    threads: Option<usize>,
+    pgn_last: u32,
+) {
     if decode_only {
         let t = threads.unwrap_or(0);
         let t0 = Instant::now();
@@ -179,8 +194,30 @@ fn run(base: &Path, pgn_out: Option<PathBuf>, sample_out: Option<PathBuf>, decod
     if decode_only && (pgn_out.is_some() || sample_out.is_some()) {
         eprintln!("--decode-only ignores outputs");
     }
-    let mut pgn_sink: Option<BufWriter<File>> =
-        if decode_only { None } else { pgn_out.map(|p| BufWriter::new(File::create(p).expect("pgn-out"))) };
+    let mut pgn_sink: Option<BufWriter<File>> = if decode_only {
+        None
+    } else {
+        pgn_out.map(|p| BufWriter::with_capacity(PGN_BUFFER, File::create(p).expect("pgn-out")))
+    };
+    // `--threads` above one exports through the Rayon pipeline: the same bytes,
+    // written in record order (`pgn-export-sota-performance` task 5.3).
+    if !decode_only && threads.unwrap_or(0) > 1 {
+        let t0 = Instant::now();
+        let mut sink = pgn_sink.take().expect("--pgn-out");
+        let stats = cbh_parser::pgn::export_range(base, &mut sink, threads.unwrap_or(0), 8192, 50, pgn_last)
+            .expect("parallel export");
+        sink.flush().expect("flush");
+        let secs = t0.elapsed().as_secs_f64();
+        println!(
+            "{{\"records\":{},\"seconds\":{secs:.2},\"records_per_second\":{:.0},\"games\":{},\"pgn_bytes\":{},\"threads\":{},\"parallel\":true}}",
+            stats.records,
+            stats.records as f64 / secs,
+            stats.games,
+            stats.bytes,
+            threads.unwrap_or(0)
+        );
+        return;
+    }
     let mut sample_sink: Option<BufWriter<File>> =
         if decode_only { None } else { sample_out.map(|p| BufWriter::new(File::create(p).expect("sample-out"))) };
     let mut pgn_bytes: u64 = 0;
@@ -403,7 +440,7 @@ fn one(
     }
     if let Some(out) = pgn_sink {
         let mut tmp = Vec::new();
-        match writer.write_game(&mut tmp, &header, entities, &game) {
+        match writer.write_game(&mut tmp, &header, entities, &game, None) {
             Ok(()) => {
                 *pgn_bytes += tmp.len() as u64;
                 out.write_all(&tmp).expect("pgn write");

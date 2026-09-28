@@ -107,6 +107,16 @@
 | `examples/cbh_pairs.rs`, `examples/pgn_pairs.rs` | Pattern for classic/2CBH dual-format pair checks |
 | `examples/annotation_census.rs`, `examples/full_form_census.rs` | Diagnostics; not needed |
 
+## Public API added by `pgn-export-sota-performance`
+
+| Ours | Notes |
+|---|---|
+| `cbh_format::cbh::bytes::{NameBuf, MAX_NAME_FIELD}` | A reusable buffer a name field decodes into; the owned `text()` stays the same decode rules |
+| `cbh_format::cbh::{Entities::player_into, tournament_into}` | The same names borrowed into caller buffers — no `Vec` per lookup, no `String` per name |
+| `cbh_chess::start::{StartCache, start_board_cached, standard_board}` | One standard board per process instead of a FEN parse per game |
+| `cbh_chess::decode::MoveSink::wants_checkers` | A sink that reads the cached `checkers` (the SAN suffix does) gets a checkers-maintaining walk; default `false` |
+| `cbh_parser::pgn::{export_parallel, export_range, ExportStats, DEFAULT_BATCH}` | The Rayon export pipeline, record-ordered and byte-identical to the sequential writer |
+
 ## Workspace mapping
 
 | Upstream | Ours |

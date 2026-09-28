@@ -1,6 +1,6 @@
 # Third-party notices
 
-`cbh-parser` is MIT licensed. It contains code derived from the following work, and references others as test oracles and format-fact sources without reusing their code or text.
+`cbvault` (formerly `cbh-parser`) is MIT licensed. It contains code derived from the following work, and references others as test oracles and format-fact sources without reusing their code or text.
 
 ## Ported with attribution
 

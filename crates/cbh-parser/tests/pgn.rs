@@ -32,7 +32,7 @@ fn export(db: &TempDb, id: u32) -> String {
     let game = GameMoves::parse(&db.path(".cbg"), &record).expect("a sound record");
     let header = headers.record(id).expect("a game");
     let mut out = Vec::new();
-    PgnWriter::new().write_game(&mut out, &header, &entities, &game).expect("the PGN writes");
+    PgnWriter::new().write_game(&mut out, &header, &entities, &game, None).expect("the PGN writes");
     String::from_utf8(out).expect("PGN is text")
 }
 
@@ -181,7 +181,7 @@ fn one_writer_serves_many_games_with_bounded_buffers() {
         let record = record_of(&db, &headers, id);
         let game = GameMoves::parse(&db.path(".cbg"), &record).expect("a sound record");
         let header = headers.record(id).expect("a game");
-        writer.write_game(&mut out, &header, &entities, &game).expect("the PGN writes");
+        writer.write_game(&mut out, &header, &entities, &game, None).expect("the PGN writes");
     }
     let text = String::from_utf8(out).expect("PGN is text");
     // Every game is there, and the ones written from the same record agree.

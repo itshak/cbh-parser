@@ -15,6 +15,7 @@ use std::path::{Path, PathBuf};
 use crate::error::{Error, Result};
 use crate::file::DbFile;
 
+pub mod annotations;
 pub mod batch;
 
 pub mod bytes;
@@ -26,6 +27,7 @@ pub mod textblocks;
 pub mod texttable;
 pub mod wide;
 
+pub use annotations::{Annotations, GameAnnotations, MAX_ANNOTATION_RECORD};
 pub use batch::Batch;
 
 pub use entities::{Entities, Entity};

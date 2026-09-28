@@ -14,7 +14,7 @@
 
 use std::path::{Path, PathBuf};
 
-use super::bytes::{le_i32, text};
+use super::bytes::{NameBuf, le_i32, text};
 use crate::error::{Error, Result};
 use crate::file::DbFile;
 use crate::game::{Date, Player, Tournament};
@@ -25,6 +25,34 @@ const MAGIC: i32 = 1_234_567_890;
 const MAX_DATA: i32 = 64 << 10;
 /// The left child of a deleted record.
 const DELETED: i32 = -999;
+
+/// An entity record's data, borrowed from the mapped file where there is one.
+#[derive(Debug)]
+enum Data<'a> {
+    /// Borrowed from the memory map: no allocation.
+    Mapped(&'a [u8]),
+    /// Read into a buffer, for a database opened without mapping.
+    Owned(Vec<u8>),
+}
+
+impl Data<'_> {
+    /// The record's data slice.
+    #[inline]
+    fn as_slice(&self) -> &[u8] {
+        match self {
+            Data::Mapped(b) => b,
+            Data::Owned(v) => v.as_slice(),
+        }
+    }
+}
+
+impl std::ops::Deref for Data<'_> {
+    type Target = [u8];
+    #[inline]
+    fn deref(&self) -> &[u8] {
+        self.as_slice()
+    }
+}
 
 /// One entity file: a header, then fixed-size records.
 #[derive(Debug)]
@@ -70,14 +98,34 @@ impl EntityFile {
     /// The data of entity `id`, or `None` for an id past the file or a
     /// deleted record.
     fn data(&self, id: u32) -> Result<Option<Vec<u8>>> {
+        Ok(self.data_ref(id)?.map(|d| d.to_vec()))
+    }
+
+    /// The data of entity `id` borrowed from the memory map where the file is
+    /// mapped — the common case, and the one the export path takes — and owned
+    /// where it is not. `None` for an id past the file or a deleted record.
+    #[inline]
+    fn data_ref(&self, id: u32) -> Result<Option<Data<'_>>> {
         if u64::from(id) >= self.count {
             return Ok(None);
         }
-        let r = self.file.read(self.header + u64::from(id) * self.record, self.record as usize)?;
+        let at = self.header + u64::from(id) * self.record;
+        let len = self.record as usize;
+        if let Some(slice) = self.file.as_slice() {
+            let start = usize::try_from(at).ok().and_then(|s| slice.get(s..s + len));
+            let Some(record) = start else {
+                return Err(Error::corrupt(self.file.path(), at, "entity record out of range"));
+            };
+            if le_i32(record, 0) == DELETED {
+                return Ok(None);
+            }
+            return Ok(Some(Data::Mapped(&record[9..])));
+        }
+        let r = self.file.read(at, len)?;
         if le_i32(&r, 0) == DELETED {
             return Ok(None);
         }
-        Ok(Some(r[9..].to_vec()))
+        Ok(Some(Data::Owned(r[9..].to_vec())))
     }
 }
 
@@ -144,16 +192,50 @@ impl Entities {
     /// The player of `id`; `None` for an id past the file or a deleted record.
     /// A blank record decodes to empty strings, not an error.
     pub fn player(&self, id: u32) -> Result<Option<Player>> {
-        Ok(self.players.data(id)?.map(|d| Player { last: text(&d[..30]), first: text(&d[30..50]) }))
+        Ok(self
+            .player_into(id, &mut NameBuf::new(), &mut NameBuf::new())?
+            .map(|(last, first)| Player { last: last.to_owned(), first: first.to_owned() }))
+    }
+
+    /// The player of `id` decoded into the caller's buffers: `(last, first)`
+    /// borrowed from them, or `None` for an id past the file or a deleted
+    /// record. The same text as [`Entities::player`], without the per-lookup
+    /// record `Vec` and the two `String`s — the PGN export's tag path.
+    pub fn player_into<'b>(
+        &self,
+        id: u32,
+        last: &'b mut NameBuf,
+        first: &'b mut NameBuf,
+    ) -> Result<Option<(&'b str, &'b str)>> {
+        let Some(data) = self.players.data_ref(id)? else { return Ok(None) };
+        last.set(&data[..30.min(data.len())]);
+        first.set(&data[30..50]);
+        Ok(Some((last.as_str(), first.as_str())))
     }
 
     /// The tournament of `id`.
     pub fn tournament(&self, id: u32) -> Result<Option<Tournament>> {
-        Ok(self.tournaments.data(id)?.map(|d| Tournament {
-            title: text(&d[..40]),
-            place: text(&d[40..70]),
-            start: Date(le_i32(&d, 0x46)),
+        let (mut title, mut place) = (NameBuf::new(), NameBuf::new());
+        Ok(self.tournament_into(id, &mut title, &mut place)?.map(|(start, title, place)| Tournament {
+            title: title.to_owned(),
+            place: place.to_owned(),
+            start,
         }))
+    }
+
+    /// The tournament of `id` decoded into the caller's buffers: its start date
+    /// and `(title, place)` borrowed from them, or `None` for an id past the
+    /// file or a deleted record. The same text as [`Entities::tournament`].
+    pub fn tournament_into<'b>(
+        &self,
+        id: u32,
+        title: &'b mut NameBuf,
+        place: &'b mut NameBuf,
+    ) -> Result<Option<(Date, &'b str, &'b str)>> {
+        let Some(data) = self.tournaments.data_ref(id)? else { return Ok(None) };
+        title.set(&data[..40.min(data.len())]);
+        place.set(&data[40..70]);
+        Ok(Some((Date(le_i32(&data, 0x46)), title.as_str(), place.as_str())))
     }
 
     /// The annotator of `id`.
@@ -189,4 +271,48 @@ pub enum Entity {
     Source,
     /// `.cbe`: teams and clubs.
     Team,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cbh_fixtures::classic::Builder;
+
+    /// Owned and borrowed access return the same text, for a blank record, a
+    /// plain name and a Windows-1252 name.
+    #[test]
+    fn borrowed_and_owned_entity_access_agree() {
+        let mut b = Builder::new();
+        b.player("Keres", "Paul");
+        b.player("Sch\u{fc}ler", "H.");
+        b.player("", "");
+        b.tournament("Paris", "FRA");
+        let db = b.write("entity-access");
+        let entities = Entities::open(&db.base()).expect("namebases");
+        let mut last = NameBuf::new();
+        let mut first = NameBuf::new();
+        for id in [0u32, 1, 2, 3, 99] {
+            let owned = entities.player(id).expect("a player");
+            let borrowed = entities.player_into(id, &mut last, &mut first).expect("a player");
+            match (owned, borrowed) {
+                (None, None) => {}
+                (Some(p), Some((l, f))) => {
+                    assert_eq!((p.last.as_str(), p.first.as_str()), (l, f), "player {id}");
+                }
+                (a, b) => panic!("player {id}: owned {a:?} against borrowed {b:?}"),
+            }
+        }
+        let (mut title, mut place) = (NameBuf::new(), NameBuf::new());
+        for id in [0u32, 1, 99] {
+            let owned = entities.tournament(id).expect("a tournament");
+            let borrowed = entities.tournament_into(id, &mut title, &mut place).expect("a tournament");
+            match (owned, borrowed) {
+                (None, None) => {}
+                (Some(t), Some((start, ti, pl))) => {
+                    assert_eq!((t.start, t.title.as_str(), t.place.as_str()), (start, ti, pl), "tournament {id}");
+                }
+                (a, b) => panic!("tournament {id}: owned {a:?} against borrowed {b:?}"),
+            }
+        }
+    }
 }

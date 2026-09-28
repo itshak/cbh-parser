@@ -6,6 +6,10 @@
 //! every game through one reused [`PgnWriter`] into a sink that counts bytes.
 //! Peak memory stays one game's worth by construction; the report records the
 //! sustained throughputs beside the upstream numbers.
+//!
+//! `criterion_group!` expands to an undocumented `fn benches`; the benches
+//! themselves are documented as usual.
+#![allow(missing_docs)]
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -102,7 +106,7 @@ fn export_all(db: &TempDb) -> (u32, u64) {
         let size = u32::from_be_bytes([0, head[1], head[2], head[3]]) as usize;
         let record = file.read(at, size).expect("a record");
         let game = GameMoves::parse(&cbg, &record).expect("a record");
-        writer.write_game(&mut sink, &header, &entities, &game).expect("PGN");
+        writer.write_game(&mut sink, &header, &entities, &game, None).expect("PGN");
         games += 1;
     }
     (games, sink.0)

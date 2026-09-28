@@ -1,4 +1,4 @@
-# SPEC.md — what cbh-parser reads
+# SPEC.md — what cbvault reads
 
 Our own statement of the ChessBase on-disk facts this project implements, in our words,
 with one source note per fact and every unknown listed. It is the fact sheet behind

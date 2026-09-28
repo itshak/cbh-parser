@@ -197,7 +197,7 @@
     },
     "parallel_batch_decode": {
       "command": "cbh verify 'Mega Database 2025' --threads 10",
-      "seconds": 7.30,
+      "seconds": 7.3,
       "records_per_second": 1528491,
       "all_plies": 883141297,
       "plies_per_second": 121052739,
@@ -263,6 +263,212 @@
       "all_plies": 883141297,
       "plies_per_second": 133809287,
       "verdict": "Multi-threaded replay reaches 1.60M-1.68M rec/s across runs (6.6-7.0 s for 11.15M games and 883M plies) - beating upstream by 8x"
+    }
+  },
+  "pgn_export_sota_performance_baseline": {
+    "recorded": "2026-09-28",
+    "change": "pgn-export-sota-performance",
+    "machine": "MacBookPro18,2, Apple M1 Max, 32 GiB, macOS, internal SSD (same as `machine` above)",
+    "note": "Pre-change baseline of the PGN export stage, measured after the phase-4 annotations closeout. Whole-database export to /dev/null, one worker, release profile; the ancestor is the cbformat `dump_classic_pgn` example built from vendor/upstream-snapshot, run on the same machine.",
+    "whole_database_export": {
+      "ours": {
+        "command": "./target/release/examples/megabase --pgn-out /dev/null",
+        "real_seconds": 171.89,
+        "user_seconds": 166.37,
+        "system_seconds": 2.57,
+        "records": 11151119,
+        "games_written": 11149379,
+        "records_per_second": 64899,
+        "pgn_bytes": 7555609003,
+        "peak_rss_bytes": 1638776832,
+        "typed_failures": 5
+      },
+      "upstream_cbformat": {
+        "command": "vendor/upstream-snapshot: ./target/release/examples/dump_classic_pgn 'Mega Database 2025/Mega Database 2025' /dev/null",
+        "real_seconds": 141.47,
+        "user_seconds": 109.97,
+        "system_seconds": 30.27,
+        "games_written": 11149370,
+        "records_skipped": 1749,
+        "pgn_bytes_full_dump": 7677061954,
+        "peak_rss_bytes": 5889998848,
+        "note": "one String accumulates the whole export, then a single fs::write; annotations differ in 4,691 games"
+      },
+      "reading": "Ours is 1.2x the wall clock for the same output volume, with 12x less system time (streamed, 1 MiB-class writes) and 3.6x less peak memory, and 3.8x fewer gold differences."
+    },
+    "decode_only_single_thread": {
+      "command": "./target/release/examples/megabase --decode-only --threads 1",
+      "seconds": 42.98,
+      "records": 11151119,
+      "plies": 883141297,
+      "plies_per_second": 20546395,
+      "peak_rss_bytes": 3964928,
+      "note": "the chess stage alone; already far ahead of the ancestor (see maximum_single_thread_decode)"
+    },
+    "gold_standard_parity": {
+      "command": "./target/release/examples/gold_pgn --out FILE",
+      "gold_games": 419385,
+      "matched": 407350,
+      "percent": 97.08,
+      "diffs": {
+        "chessbase_over_disambiguation_only": 11977,
+        "annotation": 50,
+        "other_movetext": 3,
+        "tags": 5
+      },
+      "annotation_read_errors": 0,
+      "decode_errors": 0,
+      "upstream_matched_for_comparison": 313566,
+      "upstream_diffs_for_comparison": 105819,
+      "note": "the parity floor this change must not regress: 407,350 matched / 50 annotation diffs / 0 read errors"
+    },
+    "sample_profile_export": {
+      "tool": "macOS sample(1), 6 s window of the whole-database export, 4671 samples, leaf frames",
+      "walk_and_board_share": "~70% (Walker::walk_from, Tree::play, Board::attackers_to, make/unmake, is_pseudo_legal)",
+      "gigachess_fen_parse_fen": "2.8% (Board::startpos parses a FEN string per game)",
+      "core_fmt": "~3.5% (write!(\"{}. \", fullmove) is executed 869M times; format! per tag and player)",
+      "platform_memmove": "7% (SAN -> sans -> movetext -> BufWriter)",
+      "malloc_free": "~2.5% (Vec per entity lookup, String per name, format! per token)",
+      "cbh_format_text": "~1% (entity-name decoding on the tag path)"
+    },
+    "criterion_bench_export_100k": {
+      "recorded": "2026-09-28",
+      "bench": "cargo bench --bench phase4_export (pgn_export_100k/annotated_single_thread)",
+      "workload": "100,000 generated annotated games (texts in two languages, NAGs, coloured squares and arrows, a medal, a time-spent record), one reused PgnWriter, counting sink",
+      "machine": "Apple M1 Max, release profile, criterion 0.5",
+      "pre_change_time_ms": [
+        330.75,
+        332.46,
+        334.09
+      ],
+      "pre_change_throughput_elements_per_second": [
+        299312,
+        300790,
+        302350
+      ],
+      "note": "the single-threaded export baseline the change works against; the real-database whole-DB run above (171.9 s, 64,899 records/s) is the budget gate"
+    },
+    "single_threaded_result": {
+      "recorded": "2026-09-28",
+      "tasks": "2.1-4.3: NameBuf + borrowed entity records, fmt-free numbers and tags, start-board cache (writer and walk), token/quotation buffers, byte-class text path, 1 MiB write buffer",
+      "whole_database_export": {
+        "before_seconds": 171.89,
+        "after_seconds_best": 153.44,
+        "after_seconds_repeat": 158.19,
+        "records_per_second_before": 64899,
+        "records_per_second_after": 70491,
+        "pgn_bytes_before": 7555609003,
+        "pgn_bytes_after": 7555609003,
+        "bytes_identical": true,
+        "system_seconds_before": 2.57,
+        "system_seconds_after": 1.28,
+        "peak_rss_bytes": 1640202240,
+        "note": "the real-database run varies 3-4 % with the page cache; the Criterion bench below is the controlled measurement"
+      },
+      "criterion_bench_export_100k": {
+        "before_time_ms": [
+          330.75,
+          332.46,
+          334.09
+        ],
+        "after_time_ms": [
+          217.47,
+          217.89,
+          218.31
+        ],
+        "change": "-34.4 % time, +52.6 % throughput (300 -> 459 Kelem/s), p = 0.00"
+      },
+      "profile_after": {
+        "walk_and_board": "~74 % (Walker::walk_from, Tree::play, gigachess attackers_to / make_move_unchecked / is_pseudo_legal / unmake_move)",
+        "memmove": "9.5 % (SAN -> sans -> movetext, the remaining copy; task 6.1's single-copy movetext)",
+        "core_fmt": "gone from the profile",
+        "malloc_free": "~0.5 % (was 2.5 %)",
+        "parse_fen": "gone from the profile after the walk and the writer share one cached standard board",
+        "tags": "NameBuf::set 1.2 %, escape_into 0.6 %",
+        "reading": "the remaining cost is the move walk and gigachess' SAN, which the ancestor pays too; gigachess is a crates.io dependency, so an upstream startpos_cached and a cheaper move_to_san are requests, not code here"
+      },
+      "gold_parity_after": {
+        "matched": 407350,
+        "annotation_diffs": 50,
+        "other_movetext": 3,
+        "tags": 5,
+        "annotation_read_errors": 0,
+        "decode_errors": 0,
+        "unchanged": true
+      }
+    },
+    "ply_cost_result": {
+      "recorded": "2026-09-29",
+      "change": "pgn-export-sota-performance tasks 6.1-6.8: the SAN split on gigachess 0.1.5, the per-ply `then_some` copy, and the `wants_checkers` sink contract",
+      "whole_database_single_thread": {
+        "before_seconds": 153.44,
+        "after_seconds": 138.45,
+        "change": "-9.8 %",
+        "records_per_second_before": 70491,
+        "records_per_second_after": 80542,
+        "pgn_bytes_before": 7555609003,
+        "pgn_bytes_after": 7555609011,
+        "byte_note": "+8 bytes: five games in eleven million gain a disambiguation hint the notation requires (see san_disambiguation_bug_below)",
+        "ancestor_cbformat_seconds": 141.47,
+        "head_to_head": "138.45 s against the ancestor's 141.47 s: ours is now the faster single-threaded export, and it writes the same PGN with 3.6x less peak memory (1.64 GB against 5.89 GB)"
+      },
+      "whole_database_parallel_10_threads": {
+        "before_seconds": 24.89,
+        "after_seconds": 18.78,
+        "change": "-24.6 %",
+        "records_per_second_after": 593691,
+        "pgn_bytes": 7683725549,
+        "scaling_after": {
+          "threads_2": "n/a this round",
+          "threads_8": "21.7 s (the gold harness's own run)",
+          "threads_10": "18.78 s"
+        },
+        "ancestor_comparison": "7.5x the ancestor's 141.47 s"
+      },
+      "criterion_bench_export_100k": {
+        "note": "in-process, paired against the saved baseline: the same machine state for both sides",
+        "single_thread_before_ms": [
+          217.47,
+          217.89,
+          218.31
+        ],
+        "single_thread_after_ms": [
+          199.65,
+          200.58,
+          201.85
+        ],
+        "single_thread_change": "-7.1 % time, +7.6 % throughput (463 -> 499 Kelem/s) from the ply-cost work alone",
+        "single_thread_total_arc": "332 ms (pre-change) -> 216 ms (tasks 2-4) -> 200 ms (ply cost): -40 % time, 300 -> 499 Kelem/s, +66 %",
+        "parallel_2_threads_ms": [
+          114.87,
+          116.46,
+          118.38
+        ],
+        "parallel_4_threads_ms": [
+          61.491,
+          61.633,
+          61.78
+        ],
+        "parallel_8_threads_ms": [
+          40.085,
+          40.338,
+          40.599
+        ],
+        "parallel_8_threads_change": "-32 % against the pre-ply-cost run"
+      },
+      "san_disambiguation_bug_below": {
+        "what": "gigachess' move generator reads the cached `checkers` bitboard, and `Board::play_fast` (v0.1.4) leaves that cache stale. SAN disambiguation therefore resolved its candidates against a stale king-safety answer while the exporter walked with `play_fast`.",
+        "symptom": "five games of 11,149,374 rendered under-disambiguated SAN: Rg6 for Rfg6 (game 430595), Rxb1 for Raxb1 (2312993), Qxb7 for Q8xb7 (2591629), Re7 for R8e7 (2722771), Qxg4 for Qcxg4 (3048647) - eight bytes of output in total.",
+        "fix": "`MoveSink::wants_checkers` (default false) makes the writer's tree answer true, so the walk makes moves with `Board::play` and the cache is current; the cost is +2 ns per make, and the saving is one board copy, one make_move_unchecked and one unmake_move per ply.",
+        "evidence": "a two-mode renderer over the whole database (each game's movetext rendered with the maintained and with the stale cache) reports exactly those five games, and a whole-database invariant run asserts body+suffix equals move_to_san for all 11,149,374 games' every ply",
+        "gold_parity": "unchanged: 407,350 matched / 50 annotation / 3 other / 5 tags, 0 read errors - the five games lie outside the 419,385-game gold range",
+        "lesson": "a fast move that skips a cache a later call trusts is not merely faster, it is wrong; the contract is now on the sink trait and pinned by tests/san_split.rs"
+      },
+      "gold_parity_after": {
+        "sequential": "407350 matched, 50 annotation, 3 other, 5 tags, 0 read errors, 0 decode errors",
+        "parallel_8_threads": "the same, through the Rayon pipeline",
+        "change": "none"
+      }
     }
   }
 }

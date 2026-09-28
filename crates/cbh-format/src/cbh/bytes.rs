@@ -31,6 +31,93 @@ const CP1252_HIGH: [char; 32] = [
 /// UTF-8, the rest as Windows-1252: a genuine single-byte name almost never
 /// forms valid multi-byte UTF-8. A UTF-8 text cut at the field's width may
 /// end in part of a character, which is dropped.
+/// The widest name field the classic format stores (a team name in `.cbe`).
+pub const MAX_NAME_FIELD: usize = 64;
+
+/// A fixed-size buffer a name field decodes into, so a caller can read the
+/// entity names of millions of records without allocating (the PGN writer's
+/// tag path; see `Entities::player_into`). Reused from record to record;
+/// [`NameBuf::as_str`] borrows it.
+///
+/// A field is at most [`MAX_NAME_FIELD`] bytes and decodes to at most twice
+/// that, which is what the buffer holds.
+#[derive(Clone, Debug)]
+pub struct NameBuf {
+    bytes: [u8; 2 * MAX_NAME_FIELD + 4],
+    len: usize,
+}
+
+impl Default for NameBuf {
+    fn default() -> NameBuf {
+        NameBuf::new()
+    }
+}
+
+impl NameBuf {
+    /// An empty buffer.
+    #[inline]
+    pub fn new() -> NameBuf {
+        NameBuf { bytes: [0; 2 * MAX_NAME_FIELD + 4], len: 0 }
+    }
+
+    /// The decoded text, borrowed from the buffer.
+    #[inline]
+    pub fn as_str(&self) -> &str {
+        // The bytes written are ASCII or whole UTF-8 sequences by construction.
+        std::str::from_utf8(&self.bytes[..self.len]).unwrap_or("")
+    }
+
+    /// Empties the buffer.
+    #[inline]
+    pub fn clear(&mut self) {
+        self.len = 0;
+    }
+
+    /// Decodes `field` — up to its first zero byte, and up to
+    /// [`MAX_NAME_FIELD`] bytes — with the rules of [`text`]: UTF-8 where the
+    /// bytes are valid UTF-8, else Windows-1252. A UTF-8 text cut at the field's
+    /// width may end in part of a character, which is dropped, exactly as
+    /// `text` does.
+    pub fn set(&mut self, field: &[u8]) {
+        let field = &field[..field.len().min(MAX_NAME_FIELD)];
+        let end = field.iter().position(|&b| b == 0).unwrap_or(field.len());
+        let field = &field[..end];
+        self.len = 0;
+        match std::str::from_utf8(field) {
+            Ok(text) => self.push_bytes(text.as_bytes()),
+            Err(e) if e.error_len().is_none() => {
+                let valid = &field[..e.valid_up_to()];
+                if valid.iter().any(|&b| b >= 0x80) {
+                    self.push_bytes(valid);
+                } else {
+                    self.push_single_byte(valid);
+                }
+            }
+            Err(_) => self.push_single_byte(field),
+        }
+    }
+
+    /// Copies bytes that are whole characters.
+    #[inline]
+    fn push_bytes(&mut self, bytes: &[u8]) {
+        let end = self.len + bytes.len();
+        self.bytes[self.len..end].copy_from_slice(bytes);
+        self.len = end;
+    }
+
+    /// Decodes single-byte text: Windows-1252 for 0x80-0x9f, Latin-1 above.
+    fn push_single_byte(&mut self, bytes: &[u8]) {
+        for &b in bytes {
+            let c = match b {
+                0x80..=0x9f => CP1252_HIGH[(b - 0x80) as usize],
+                _ => b as char,
+            };
+            let mut buf = [0u8; 4];
+            self.push_bytes(c.encode_utf8(&mut buf).as_bytes());
+        }
+    }
+}
+
 pub(crate) fn text(field: &[u8]) -> String {
     let end = field.iter().position(|&b| b == 0).unwrap_or(field.len());
     match std::str::from_utf8(&field[..end]) {
@@ -55,6 +142,39 @@ pub(crate) fn text(field: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A `NameBuf` decodes what `text` decodes, without allocating.
+    #[test]
+    fn name_buf_matches_text() {
+        let cases: [&[u8]; 5] = [b"Keres\0rest", b"Bauer, H.", b"Sch\x80le\x81r", b"", b"\xff\xfe"];
+        for field in cases {
+            let mut buf = NameBuf::new();
+            buf.set(field);
+            assert_eq!(buf.as_str(), text(field), "field {field:?}");
+        }
+    }
+
+    /// A UTF-8 field cut at the buffer width drops the partial character, as
+    /// `text` does.
+    #[test]
+    fn name_buf_drops_a_cut_character() {
+        let field = "Grüße".as_bytes();
+        let mut buf = NameBuf::new();
+        // The field width the format would cut at: four bytes of "Grüße".
+        buf.set(&field[..4]);
+        assert_eq!(buf.as_str(), text(&field[..4]));
+    }
+
+    /// Reuse: a second, shorter name leaves nothing of the first.
+    #[test]
+    fn name_buf_reuse_drops_the_previous_text() {
+        let mut buf = NameBuf::new();
+        buf.set(b"Keres\0");
+        buf.set(b"Bauer");
+        assert_eq!(buf.as_str(), "Bauer");
+        buf.clear();
+        assert_eq!(buf.as_str(), "");
+    }
 
     #[test]
     fn integers() {

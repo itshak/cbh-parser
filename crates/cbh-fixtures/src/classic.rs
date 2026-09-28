@@ -398,3 +398,42 @@ pub fn annotation_record(id: u32, items: &[(i32, u8, &[u8])]) -> Vec<u8> {
     r[10..14].copy_from_slice(&size);
     r
 }
+
+/// A text annotation item: type `02`, or `82` when `before`, with the nation
+/// code (42 English, 53 German, 0 any) and the text's bytes.
+pub fn text_item(position: i32, before: bool, nation: u8, text: &str) -> (i32, u8, Vec<u8>) {
+    let mut data = vec![0, nation];
+    data.extend_from_slice(text.as_bytes());
+    (position, if before { 0x82 } else { 0x02 }, data)
+}
+
+/// A symbols annotation item: type `03`, the NAGs on the move, on the
+/// position and as a prefix; zero means none.
+pub fn symbols_item(position: i32, on_move: u8, on_position: u8, prefix: u8) -> (i32, u8, Vec<u8>) {
+    (position, 0x03, vec![on_move, on_position, prefix])
+}
+
+/// A coloured-squares annotation item: type `04`, (colour, square) pairs,
+/// squares numbered from 1 file by file (2 green, 3 yellow, 4 red).
+pub fn squares_item(position: i32, pairs: &[(u8, u8)]) -> (i32, u8, Vec<u8>) {
+    (position, 0x04, pairs.iter().flat_map(|&(c, s)| [c, s]).collect())
+}
+
+/// A coloured-arrows annotation item: type `05`, (colour, from, to) triples
+/// with the squares numbered as in [`squares_item`].
+pub fn arrows_item(position: i32, triples: &[(u8, u8, u8)]) -> (i32, u8, Vec<u8>) {
+    (position, 0x05, triples.iter().flat_map(|&(c, f, t)| [c, f, t]).collect())
+}
+
+/// Any item with a payload of its own: critical positions, medals, clocks,
+/// quotations, evaluations and the multimedia kinds.
+pub fn raw_item(position: i32, code: u8, data: &[u8]) -> (i32, u8, Vec<u8>) {
+    (position, code, data.to_vec())
+}
+
+/// [`annotation_record`] for items that own their data, as the builders above
+/// return them.
+pub fn annotation_items(id: u32, items: &[(i32, u8, Vec<u8>)]) -> Vec<u8> {
+    let refs: Vec<(i32, u8, &[u8])> = items.iter().map(|&(p, t, ref d)| (p, t, d.as_slice())).collect();
+    annotation_record(id, &refs)
+}

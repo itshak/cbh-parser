@@ -10,7 +10,7 @@ rust-version = "1.88"
 repository = "https://github.com/itshak/cbh-parser"
 
 [workspace.dependencies]
-gigachess = "0.1.4"
+gigachess = "0.1.5"
 cbh-format = { version = "0.1.0", path = "crates/cbh-format" }
 cbh-chess = { version = "0.1.0", path = "crates/cbh-chess" }
 cbh-parser = { version = "0.1.0", path = "crates/cbh-parser" }

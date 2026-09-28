@@ -36,9 +36,9 @@
 
 ## Phase 4 — Annotations
 
-- [ ] 4.1 Port `.cba` record framing and annotation record types (text before/after, symbols/NAGs, critical position, pawn structure, piece path, quotation, medal, colour, …). Verify: one fixture per kind.
-- [ ] 4.2 Map annotations onto the variation tree in order; expose a stable comment model. Verify: annotated-game golden dumps.
-- [ ] 4.3 Multimedia kinds (sound/video/picture) decode as record kinds without payloads; games never fail on them. Verify: fixture containing multimedia records.
+- [x] 4.1 Port `.cba` record framing and annotation record types (text before/after, symbols/NAGs, critical position, pawn structure, piece path, quotation, medal, colour, …). Verify: one fixture per kind.
+- [x] 4.2 Map annotations onto the variation tree in order; expose a stable comment model. Verify: annotated-game golden dumps.
+- [x] 4.3 Multimedia kinds (sound/video/picture) decode as record kinds without payloads; games never fail on them. Verify: fixture containing multimedia records.
 
 ## Phase 5 — `.cbv`/`.cbz` containers (clean-room)
 

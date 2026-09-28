@@ -6,10 +6,12 @@
 //! Ported from `cbformat` in `oschess-cb-bridge` @ `ca9e8f8e` (MIT); see
 //! `docs/provenance.md`.
 
+pub mod annotations;
 mod entities;
 mod fields;
 mod head;
 
+pub use annotations::{Annotation, GAME_POSITION, Kind, Quotation, QuotedPlayer, language, timing};
 pub use entities::{Player, Tournament};
 pub use fields::{Date, Eco, GameResult, ROUND_TEXT_BYTES, RecordKind, round_text};
 pub use head::Head;

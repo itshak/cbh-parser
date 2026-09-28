@@ -23,5 +23,9 @@ cbh-fixtures.workspace = true
 name = "phase3"
 harness = false
 
+[[bench]]
+name = "phase4_export"
+harness = false
+
 [lints]
 workspace = true

@@ -1,8 +1,8 @@
-# cbh-database
+# cbvault
 
 ## Purpose
 
-Define what `cbh-parser` must do: read ChessBase databases (classic `.cbh` family, 2CBH `.2cbh` family, `.cbv`/`.cbz` archives) safely and fast, decode games into 16-bit `moves2` streams through `gigachess`, and expose metadata and annotations — read-only, MIT-licensed, zero-allocation in hot paths.
+Define what `cbvault` (formerly `cbh-parser`) must do: read ChessBase databases (classic `.cbh` family, 2CBH `.2cbh` family, `.cbv`/`.cbz` archives) safely and fast, decode games into 16-bit `moves2` streams through `gigachess`, and expose metadata and annotations — read-only, MIT-licensed, zero-allocation in hot paths.
 
 ## Requirements
 
