@@ -13,7 +13,7 @@
 //! promotion captures (and the distinct-capture split), annotated games
 //! (header offset only, pending phase 4 checks), and the failure list.
 use cbvault::pgn::PgnWriter;
-use cbvault_chess::decode::{GameRef, MoveSink, NULL_MOVE, start_as_played, walk_from};
+use cbvault_chess::decode::{GameRef, MoveSink, start_as_played, walk_from};
 use cbvault_chess::start::{Start, start_board};
 use cbvault_format::cbh::moves::GameMoves;
 use cbvault_format::cbh::{Annotations, Entities, GameHeader, Headers, Wide};
@@ -33,11 +33,11 @@ struct Counter {
 }
 impl MoveSink for Counter {
     fn play(&mut self, before: &Board, mv: u16, _main: bool) {
-        if mv == NULL_MOVE {
+        let mv = Move::from_word(mv);
+        if mv.is_null() {
             self.null_moves += 1;
             return;
         }
-        let mv = Move::from_word(mv);
         let moving = before.piece_at(mv.from());
         let target = before.piece_at(mv.to());
         let pawn = matches!(moving, Some(p) if p.role == gigachess::Role::Pawn);
@@ -94,15 +94,13 @@ fn main_line_sans(game: &GameMoves<'_>) -> Result<String, String> {
             if !self.sans.is_empty() {
                 self.sans.push('|');
             }
-            if mv == NULL_MOVE {
-                self.sans.push_str("--");
-                self.board.make_null_move().expect("replay");
-            } else {
-                let mv = Move::from_word(mv);
-                let san = gigachess::san::move_to_san(&self.board, mv).expect("replay");
-                self.sans.push_str(&san);
-                self.board.play(mv).expect("replay");
-            }
+            // One path for a pass and an ordinary move alike: `move_to_san`
+            // renders `Move::NULL` as a bare `--` and `play` applies it, so the
+            // special case this example used to carry is gone.
+            let mv = Move::from_word(mv);
+            let san = gigachess::san::move_to_san(&self.board, mv).expect("replay");
+            self.sans.push_str(&san);
+            self.board.play(mv).expect("replay");
         }
         fn played(&mut self, _board: &Board) {}
         fn branch(&mut self) {}

@@ -35,7 +35,7 @@ pub use parallel::{DEFAULT_BATCH, ExportStats, export_parallel, export_range};
 
 use std::io::{self, Write};
 
-use cbvault_chess::decode::{GameRef, MoveSink, NULL_MOVE, start_as_played, walk_from};
+use cbvault_chess::decode::{GameRef, MoveSink, start_as_played, walk_from};
 use cbvault_chess::start::{Start, StartCache, start_board_cached};
 use cbvault_format::cbh::GameAnnotations;
 use cbvault_format::cbh::bytes::NameBuf;
@@ -163,18 +163,18 @@ impl MoveSink for Tree {
         // and the monolith's second make/unmake per ply is gone
         // (`pgn-export-sota-performance` task 6.4).
         self.suffix_pending = false;
-        match mv {
-            NULL_MOVE => san.push_str("--"),
-            mv => {
-                let mv = Move::from_word(mv);
-                match move_to_san_body(before, mv) {
-                    Some(body) => {
-                        san = body;
-                        self.suffix_pending = true;
-                    }
-                    None => san.push_str("??"),
-                }
+        // No special case for a pass: since `gigachess` 0.1.9 `move_to_san_body`
+        // renders `Move::NULL` as `--` itself, so the null word no longer needs a
+        // branch here to be spelled. The one thing the caller still owns is
+        // whether to ask for a suffix — a pass neither gives nor answers check,
+        // so `--` must stay bare.
+        let mv = Move::from_word(mv);
+        match move_to_san_body(before, mv) {
+            Some(body) => {
+                san = body;
+                self.suffix_pending = !mv.is_null();
             }
+            None => san.push_str("??"),
         }
         let white = before.turn() == Color::White;
         // The number ChessBase's own export writes. A move from the root takes

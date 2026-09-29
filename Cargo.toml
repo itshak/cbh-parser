@@ -10,7 +10,7 @@ rust-version = "1.88"
 repository = "https://github.com/itshak/cbvault"
 
 [workspace.dependencies]
-gigachess = "0.1.6"
+gigachess = "0.1.9"
 cbvault-format = { version = "0.1.0", path = "crates/cbvault-format" }
 cbvault-chess = { version = "0.1.0", path = "crates/cbvault-chess" }
 cbvault = { version = "0.1.0", path = "crates/cbvault" }

@@ -253,3 +253,31 @@ fn a_long_game_decodes_in_every_mode() {
         assert_eq!(buf.moves(), want.as_slice(), "mode {mode}");
     }
 }
+
+/// `NULL_MOVE` is a convenience alias, not a second source of truth. It is
+/// derived from `gigachess::Move::NULL`, and this pins that: if the engine ever
+/// changes the sentinel, the alias follows it and the compile-time `const`
+/// initialiser fails loudly rather than this crate silently decoding a word the
+/// engine no longer treats as a pass.
+#[test]
+fn null_move_alias_is_the_engine_word() {
+    assert_eq!(NULL_MOVE, gigachess::Move::NULL.word());
+    assert!(gigachess::Move::from_word(NULL_MOVE).is_null());
+    assert_eq!(NULL_MOVE, 0xffff, "the CBH wire value the format fixes");
+
+    // And the engine's own view of a pass is what this crate relies on: legal out
+    // of check, illegal in it, and never offered as a legal move. The position
+    // is reached by playing, so the claim is about the position rather than a
+    // hand-built FEN.
+    let f2f3 = Move::new(
+        Square::from_alg("f2").expect("f2"),
+        Square::from_alg("f3").expect("f3"),
+        None,
+    );
+    let mut board = gigachess::Board::startpos();
+    board.play(f2f3).expect("f2f3 is legal");
+    assert!(!board.in_check());
+    assert!(board.is_legal(gigachess::Move::NULL));
+    assert!(board.play(gigachess::Move::NULL).is_ok());
+    assert!(!board.legal_moves().iter().any(|m| m.is_null()));
+}

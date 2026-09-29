@@ -9,7 +9,7 @@ use cbvault_format::cbh::moves::GameMoves;
 use cbvault_format::cbh::{Entities, GameHeader, Headers};
 use cbvault_format::file::DbFile;
 use cbvault_format::game::RecordKind;
-use gigachess::Board;
+use gigachess::{Board, Move};
 use gigachess::san::san_to_move;
 
 /// The base path of the set to check, or `None` when it is not on this machine.
@@ -45,11 +45,13 @@ fn start_of(pgn: &str) -> Board {
     }
 }
 
-/// A null move in the emitted movetext: the decoder plays it as a passed turn
-/// through `Board::make_null_move`, so the replayer passes the turn the same
-/// way, then replays on.
+/// A null move in the emitted movetext: since `gigachess` 0.1.9 the decoder
+/// hands the pass to the board as an ordinary `Move::NULL`, so the replayer
+/// plays it the same way through the same entry point, then replays on.
 fn through_null(board: &mut Board, before_last: &mut Board) {
-    board.make_null_move().expect("the writer only emits a null move outside check");
+    board
+        .play(Move::NULL)
+        .expect("the writer only emits a null move outside check");
     *before_last = *board;
 }
 

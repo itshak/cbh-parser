@@ -29,7 +29,14 @@ pub const MAX_VARIATION_DEPTH: usize = 1024;
 
 /// The null move's marker in a `moves2` stream: no legal move word equals it,
 /// since it names the same square twice and a promotion value above 4.
-pub const NULL_MOVE: u16 = 0xffff;
+///
+/// Since `gigachess` 0.1.9 the pass is a first-class [`Move`] — [`Move::NULL`]
+/// — that dispatches in every make and play entry point, so this crate no longer
+/// has to recognise the word and translate it. The constant is kept, and kept as
+/// a `u16` word rather than a `Move`, so downstream code and the existing
+/// fixtures are unaffected; its value is taken from `gigachess` so the two
+/// cannot drift apart (pinned by `null_move_alias_is_the_engine_word`).
+pub const NULL_MOVE: u16 = Move::NULL.word();
 
 /// What a walk reports to.
 ///
@@ -191,35 +198,53 @@ impl<S: MoveSink> Walker<'_, S> {
         // task 6.3).
         let saved = if self.branch_next { Some((self.board, self.pieces)) } else { None };
         self.branch_next = false;
-        if mv == NULL_MOVE {
-            // A pass is a move: gigachess flips the side, clears a pending
-            // double push, and advances the clocks and the fullmove number.
-            self.sink.play(&self.board, NULL_MOVE, self.main);
-            self.board.make_null_move().map_err(|_| self.fail("null move in check".into()))?;
-        } else {
-            let mv = Move::from_word(mv);
-            self.sink.play(&self.board, mv.word(), self.main);
-            let before = self.board;
-            let us = before.turn();
-            // The walk keeps the cached checkers current when it is the one that
-            // reads them: a `Tree` sink appends the check/mate suffix from the
-            // position the move leaves behind (`gigachess` 0.1.5's
-            // `check_mate_suffix`), and that reads `checkers`, which
-            // `play_fast` leaves stale. `+2 ns` per make buys one whole ply of
-            // SAN work back; a sink that wants the fast make (the replay
-            // verifier, which validates legality and nothing else) keeps it.
-            let res = if self.sink.wants_zobrist() || self.sink.wants_checkers() {
-                self.board.play(mv).map(|_| ())
+        let mv = Move::from_word(mv);
+        // A pass needs no special case: since `gigachess` 0.1.9 the null word is
+        // `Move::NULL` and every make entry point dispatches it, so the walk
+        // hands it over like any other move and the board flips the side, clears
+        // a pending double push, and advances the clocks and the move number.
+        // What the sink sees is the same `0xffff` word it always saw.
+        self.sink.play(&self.board, mv.word(), self.main);
+        let before = self.board;
+        let us = before.turn();
+        // Which make to use is exactly what the sink reads, and `gigachess`
+        // 0.1.7 turned that from a two-way choice into a four-way one:
+        //
+        //   neither  → `play_fast`   — no hash, no checkers cache
+        //   key only → `play_hashed` — incremental hash live, `checkers` stale
+        //   cache    → `play_checkered` — `checkers` live, hash stale
+        //   both     → `play`        — both live
+        //
+        // A `Tree` sink appends the check/mate suffix from the position the move
+        // leaves behind, and that reads `checkers`; a key-only sink reads
+        // `zobrist()`. Picking the exact one each needs is what the four-way
+        // split buys: a sink that wants only the key no longer pays the ~4.4 ns
+        // `attackers_to` refresh per ply, measured over 883M plies of the
+        // reference database. Sinks that want neither keep `play_fast`, which is
+        // the replay verifier — it validates legality and nothing else.
+        let res = match (self.sink.wants_zobrist(), self.sink.wants_checkers()) {
+            (true, true) => self.board.play(mv).map(|_| ()),
+            (true, false) => self.board.play_hashed(mv).map(|_| ()),
+            (false, true) => self.board.play_checkered(mv).map(|_| ()),
+            (false, false) => self.board.play_fast(mv).map(|_| ()),
+        };
+        if res.is_err() {
+            return Err(self.fail(if mv.is_null() {
+                "null move in check".to_string()
             } else {
-                self.board.play_fast(mv).map(|_| ())
-            };
-            if res.is_err() {
-                return Err(self.fail(format!(
+                format!(
                     "illegal move {}-{} (word {code:#06x})",
                     square_text(mv.from()),
                     square_text(mv.to())
-                )));
-            }
+                )
+            }));
+        }
+        // A pass moves no piece, so the piece lists are unchanged and must not be
+        // touched: `update` checks that the moving piece matches the board, and
+        // the null word names no piece. It also has to be skipped, not made
+        // tolerant, or the invariant that the lists mirror the board stops being
+        // checked on every other move.
+        if !mv.is_null() {
             self.pieces.update(&before, us, mv)?;
         }
         self.sink.played(&self.board);

@@ -16,9 +16,9 @@
 
 use cbvault_format::cbh::moves::GameMoves;
 use cbvault_format::error::Result;
-use gigachess::Board;
+use gigachess::{Board, Move};
 
-use super::decode::{GameRef, MoveSink, NULL_MOVE, TreeStats, start_as_played, walk_from};
+use super::decode::{GameRef, MoveSink, TreeStats, start_as_played, walk_from};
 use super::start::start_board;
 
 /// The parent of a move played from the start position.
@@ -97,9 +97,11 @@ impl MovesBuf {
         self.moves.is_empty()
     }
 
-    /// Whether move `i` carries the null-move marker.
+    /// Whether move `i` is a pass.
     pub fn is_null(&self, i: usize) -> bool {
-        self.moves.get(i) == Some(&NULL_MOVE)
+        self.moves
+            .get(i)
+            .is_some_and(|w| Move::from_word(*w).is_null())
     }
 }
 

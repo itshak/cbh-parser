@@ -42,6 +42,11 @@ fn is_allowlisted(path: &str) -> bool {
     path.starts_with("openspec/changes/archive/")
         || path == "openspec/adr/006-cbvault-rename.md"
         || path.starts_with("openspec/changes/rename-cbvault/")
+        // This file necessarily spells the retired names out, in order to grep
+        // for them. Without this the guard fails on its own `OLD_NAMES` and can
+        // never pass, which is how it went unnoticed: a guard that is always red
+        // stops being read as a signal.
+        || path == "crates/cbvault/tests/rename_guard.rs"
 }
 
 #[test]

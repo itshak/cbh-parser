@@ -153,7 +153,7 @@ impl Lists {
 fn uci_move_for(side: gigachess::Color, b: &Board, uci: &str) -> Move {
     let mut probe = *b;
     while probe.turn() != side {
-        probe.make_null_move().expect("a null move outside check");
+        probe.play(Move::NULL).expect("a null move outside check");
     }
     let found = probe.legal_moves().iter().copied().find(|mv| {
         let mut text = format!("{}{}", alg(mv.from()), alg(mv.to()));
@@ -312,7 +312,7 @@ pub fn encode(start: &Board, toks: &[Tok<'_>], mode: u8, two_byte: bool) -> Vec<
                         // pieces move on the probed one.
                         let mut probe = board;
                         while probe.turn() != us {
-                            probe.make_null_move().expect("a null move outside check");
+                            probe.play(Move::NULL).expect("a null move outside check");
                         }
                         probe.play(mv).expect("legal fixture move");
                         let _ = probe;
