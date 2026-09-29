@@ -55,13 +55,19 @@ const NONE: u32 = u32::MAX;
 /// candidate on its own, which is cheaper (8.1 ns per SAN body against 13.5 ns
 /// over 13.9 M moves of the reference database) and, written carefully,
 /// identical - 0 differing moves on that slice, and the same gold result
-/// (407,350 of 419,385, the same twelve thousand diffs). The two traps are the
-/// ones the study hit: the king to ask about is the *mover's* (`us`), not the
-/// side to move after the move, and a pinned candidate must be dropped, which
-/// is what the king-safety query is for. It belongs upstream in `gigachess`,
-/// which owns the SAN rule here; `examples/san_probe.rs` measures both and
-/// `docs/gigachess-san-disambiguation.patch` carries the hunk.
-/// `docs/format-spec.md` §11.7.
+/// (407,350 of 419,385, the same twelve thousand diffs).
+///
+/// The two values that decide a candidate's legality are the *mover's* king and
+/// the side that moves next, both taken from the caller's position: asking
+/// about the side to move after the candidate, attacked by its own pieces, is a
+/// question with no meaning (White's rook on h1 "defends" its own king on e1),
+/// and it silently drops hints that should be there - the study's first attempt
+/// did exactly that and lost 324,013 gold games, which read as a correctness
+/// wall rather than as a bug in the question.
+///
+/// The change belongs upstream in `gigachess`, which owns the SAN rule here;
+/// the hunk is `docs/gigachess-san-disambiguation.patch`, `examples/san_probe.rs`
+/// measures both forms, and `docs/format-spec.md` §11.7 has the numbers.
 ///
 /// One decoded move: its SAN and check/mate suffix inline — `gigachess` hands
 /// the body over in a fixed-size [`San`] by value, so the walk stores it in
