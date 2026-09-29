@@ -570,6 +570,96 @@
         "allocator": "out of the top of the profile: no per-game allocation is left in the export"
       },
       "not_done_and_why": "the full single-copy movetext stays infeasible (see the archived task 7.1): a side line is stored before the main continuation it belongs to, and MoveSink::branch fires after any move followed by a line change, so the walk cannot own the layout or the forced numbers. What it would still save is the per-move SAN copy, which needs unsafe to beat the memcpy call - the workspace warns on unsafe and the gain does not justify it."
+    },
+    "buffer_sweep": {
+      "recorded": "2026-09-29",
+      "question": "is the 1 MiB write buffer and the 8,192-record chunk the right pair, or does a bigger buffer go faster?",
+      "method": "the two knobs are now flags on the `megabase` example (`--pgn-buffer BYTES`, `--pgn-batch RECORDS`); each row is a whole run with `/usr/bin/time -l`, on the reference database, to /dev/null and to a file on the internal SSD",
+      "write_buffer_single_thread_to_a_file": {
+        "records": 1000000,
+        "output_bytes": 690000000,
+        "64KiB": [
+          11.26,
+          184041472
+        ],
+        "256KiB": [
+          11.24,
+          184451072
+        ],
+        "1MiB": [
+          11.12,
+          185237504
+        ],
+        "4MiB": [
+          11.13,
+          188416000
+        ],
+        "16MiB": [
+          11.09,
+          200966144
+        ],
+        "reading": "64 KiB to 16 MiB is 1.5 % of the wall clock for 17 MB of resident memory; 1 MiB is on the plateau and 16 MiB is inside the same run-to-run range"
+      },
+      "write_buffer_ten_threads_to_dev_null_three_runs_each": {
+        "records": 3000000,
+        "256KiB": [
+          5.1,
+          5.24,
+          5.36
+        ],
+        "1MiB": [
+          5.06,
+          5.19,
+          5.34
+        ],
+        "4MiB": [
+          5.08,
+          5.17,
+          5.17
+        ],
+        "16MiB": [
+          5.09,
+          5.1,
+          5.13
+        ],
+        "reading": "medians 5.24 / 5.19 / 5.17 / 5.10 s: 2.7 % from 256 KiB to 16 MiB, which is the size of the spread inside each configuration; the sink buffer is one allocation for the whole process, so 15 MB more of it is 0.2 % of the 7.3 GB peak"
+      },
+      "chunk_size_ten_threads": {
+        "records": 3000000,
+        "output_bytes": 2060000000,
+        "1024": [
+          6.26,
+          947978240
+        ],
+        "2048": [
+          6.04,
+          965312512
+        ],
+        "4096": [
+          5.73,
+          977551360
+        ],
+        "8192": [
+          5.31,
+          1007583232
+        ],
+        "16384": [
+          5.2,
+          1069056000
+        ],
+        "32768": [
+          5.22,
+          1181859840
+        ],
+        "65536": [
+          5.06,
+          1402847232
+        ],
+        "reading": "the knee is 8,192-16,384: 16,384 buys 2.1 % for +60 MB, 65,536 buys 4.7 % for +390 MB. 8,192 stays the default, on the knee, and the flag is there for a caller who wants the last 2 %",
+        "single_thread": "34.16-34.37 s across 1,024 to 32,768 records per chunk: the chunk size does not matter with one worker, only the pipeline's memory and its load balance do"
+      },
+      "conclusion": "the defaults are at the knee, not on a slope: raising the write buffer buys at most a couple of per cent for 0.2 % more memory and no measurable gain, and raising the chunk size trades memory for a few per cent. Both are tunable per run now, and neither default changes.",
+      "side_fix": "`--pgn-last` only reached the parallel path before this round; the sequential walk ignored it and exported the whole database. It bounds both now, which is what the sweeps above needed."
     }
   }
 }

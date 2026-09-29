@@ -72,6 +72,11 @@ fn peak_rss_bytes() -> u64 {
 /// thousands of writes instead of the ~1,000,000 that an 8 KiB buffer needs
 /// for 7.6 GB (`pgn-export-sota-performance` task 4.2).
 const PGN_BUFFER: usize = 1 << 20;
+/// The default, and the tuned value: the write buffer's cost is 1 MiB of
+/// resident memory for the whole export, and its benefit has flattened out by
+/// 1 MiB — see `benchmarks/baseline.json` under `buffer_sweep` for the sweep of
+/// 64 KiB .. 16 MiB and the chunk-size sweep behind it.
+const PGN_BATCH: u32 = 8192;
 
 fn main_line_sans(game: &GameMoves<'_>) -> Result<String, String> {
     let what = GameRef::new(0);
@@ -114,6 +119,8 @@ fn main() {
     });
     let mut pgn_out: Option<PathBuf> = None;
     let mut pgn_last: u32 = 0;
+    let mut pgn_buffer: usize = PGN_BUFFER;
+    let mut pgn_batch: u32 = PGN_BATCH;
     let mut sample_out: Option<PathBuf> = None;
     let mut decode_only = false;
     let mut threads: Option<usize> = None;
@@ -121,6 +128,8 @@ fn main() {
         match arg.as_str() {
             "--pgn-out" => pgn_out = args.next().map(PathBuf::from),
             "--pgn-last" => pgn_last = args.next().and_then(|v| v.parse().ok()).unwrap_or(0),
+            "--pgn-buffer" => pgn_buffer = args.next().and_then(|v| v.parse().ok()).unwrap_or(PGN_BUFFER),
+            "--pgn-batch" => pgn_batch = args.next().and_then(|v| v.parse().ok()).unwrap_or(PGN_BATCH),
             "--sample-out" => sample_out = args.next().map(PathBuf::from),
             "--decode-only" => decode_only = true,
             "--threads" => {
@@ -129,7 +138,7 @@ fn main() {
             other => base = other.to_string(),
         }
     }
-    run(&PathBuf::from(base), pgn_out, sample_out, decode_only, threads, pgn_last);
+    run(&PathBuf::from(base), pgn_out, sample_out, decode_only, threads, pgn_last, pgn_buffer, pgn_batch);
 }
 
 #[allow(clippy::too_many_lines)]
@@ -141,6 +150,8 @@ fn run(
     decode_only: bool,
     threads: Option<usize>,
     pgn_last: u32,
+    pgn_buffer: usize,
+    pgn_batch: u32,
 ) {
     if decode_only {
         let t = threads.unwrap_or(0);
@@ -197,14 +208,14 @@ fn run(
     let mut pgn_sink: Option<BufWriter<File>> = if decode_only {
         None
     } else {
-        pgn_out.map(|p| BufWriter::with_capacity(PGN_BUFFER, File::create(p).expect("pgn-out")))
+        pgn_out.map(|p| BufWriter::with_capacity(pgn_buffer, File::create(p).expect("pgn-out")))
     };
     // `--threads` above one exports through the Rayon pipeline: the same bytes,
     // written in record order (`pgn-export-sota-performance` task 5.3).
     if !decode_only && threads.unwrap_or(0) > 1 {
         let t0 = Instant::now();
         let mut sink = pgn_sink.take().expect("--pgn-out");
-        let stats = cbh_parser::pgn::export_range(base, &mut sink, threads.unwrap_or(0), 8192, 50, pgn_last)
+        let stats = cbh_parser::pgn::export_range(base, &mut sink, threads.unwrap_or(0), pgn_batch, 50, pgn_last)
             .expect("parallel export");
         sink.flush().expect("flush");
         let secs = t0.elapsed().as_secs_f64();
@@ -231,16 +242,21 @@ fn run(
     let mut main_plies = 0u64;
     let mut total_plies = 0u64;
     let mut failures: Vec<String> = Vec::new();
+    // `--pgn-last` bounds the walk, as it does the parallel path: a range
+    // export, which the buffer sweeps use.
+    let upto = if pgn_last == 0 { total } else { pgn_last.min(total) };
     let is_sample =
         |id: u32| id <= 2 || (2_601_298..=2_601_308).contains(&id) || id == 2_602_603 || id > total.saturating_sub(2);
     let t0 = Instant::now();
     let mut id = 1u32;
-    while id <= total {
+    while id <= upto {
         let n = headers.read_records(id, 160, &mut header_buf).expect("batch");
         if n == 0 {
             break;
         }
-        for i in 0..n {
+        // The batch may reach past `--pgn-last`; only the records in range go.
+        let last = (id + n - 1).min(upto);
+        for i in 0..=(last - id) {
             one(
                 id + i,
                 &header_buf[i as usize * 46..(i as usize + 1) * 46],
@@ -267,7 +283,7 @@ fn run(
                 &mut failures,
             );
         }
-        id += n;
+        id = last + 1;
     }
     if let Some(mut out) = pgn_sink {
         out.flush().expect("flush");

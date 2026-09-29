@@ -510,8 +510,18 @@ fast path in `NameBuf::set`, and recycled chunk buffers in the parallel
 pipeline. That is **128.1–130.0 s single-threaded (87,029 records/s)** and
 **19.7–20.6 s at ten threads (144.2 s of CPU against 152.4 s, 0.73 s of system
 time against 1.68 s)**, byte for byte the same 7,555,609,011 bytes, with the
-gold counts unchanged. The numbers are in `benchmarks/baseline.json` under
-`second_round_inline_san_and_write_path`):
+gold counts unchanged. The two buffer knobs were swept afterwards, with both
+now flags on the `megabase` example (`--pgn-buffer`, `--pgn-batch`), over the
+reference database and to both a file and `/dev/null`: the write buffer is
+worth 1.5 % of the wall clock from 64 KiB to 16 MiB (11.26 s → 11.09 s
+single-threaded over a million records; medians 5.24 / 5.19 / 5.17 / 5.10 s at
+ten threads, which is the size of the spread inside each configuration), and
+the chunk size has its knee at 8,192–16,384 records — 16,384 buys 2.1 % for
+60 MB of peak RSS, 65,536 buys 4.7 % for 390 MB, and with one worker the chunk
+size does not matter at all. **The defaults stand at 1 MiB and 8,192: both are
+on the knee, and neither change makes the export measurably faster.** The
+numbers are in `benchmarks/baseline.json` under `buffer_sweep` and
+`second_round_inline_san_and_write_path`:
 
 | | upstream `cbformat` | ours |
 |---|---|---|
