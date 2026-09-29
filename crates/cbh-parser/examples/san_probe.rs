@@ -56,8 +56,12 @@ fn san_body_per_candidate(board: &Board, mv: Move) -> Option<San> {
                     // the position: the ancestor tests exactly this.
                     let mut tmp = *board;
                     let cm = Move::new(Square::new(cand), to, mv.promotion());
+                    // The mover's king must stand safe afterwards - the
+                    // question gigachess' own debug_assert asks, and the one a
+                    // pinned candidate fails.
+                    let mover = board.turn();
                     if let Ok(undo) = tmp.play(cm)
-                        && tmp.attackers_to(tmp.king_square(tmp.turn()).0, tmp.turn(), tmp.occupied()) == 0
+                        && tmp.attackers_to(tmp.king_square(mover).0, mover.other(), tmp.occupied()) == 0
                     {
                         tmp.unmake_move(cm, undo);
                         any = true;
@@ -109,6 +113,7 @@ struct Sink {
     per_candidate: bool,
     sink_san: bool,
     mate: bool,
+    suffix: bool,
     stats: Stats,
     examples: Vec<String>,
 }
@@ -152,6 +157,52 @@ impl MoveSink for Sink {
                         if self.examples.len() < 5 {
                             self.examples.push(format!("{} vs {}", x.as_str(), y.as_str()));
                         }
+                        if self.examples.len() == 1
+                            && let (Some(piece), Some(want)) =
+                                (before.piece_at(mv.from()), move_to_san_body(before, mv))
+                        {
+                            let to = mv.to();
+                            let occ = before.occupied();
+                            let att = match piece.role {
+                                Role::Knight => KNIGHT_ATT[to.index()],
+                                Role::Bishop => attacks::bishop_attacks(to.0, occ),
+                                Role::Rook => attacks::rook_attacks(to.0, occ),
+                                Role::Queen => attacks::queen_attacks(to.0, occ),
+                                Role::King => KING_ATT[to.index()],
+                                _ => 0,
+                            };
+                            let others = att & before.piece_bb(piece.color, piece.role) & !(1u64 << mv.from().0);
+                            let mut report = format!(
+                                "DIAG move {}{:?} piece {:?} fen {} | gigachess {} | mine {} | candidates:",
+                                mv.from(),
+                                to,
+                                piece,
+                                before.to_fen(),
+                                want.as_str(),
+                                y.as_str()
+                            );
+                            for cand in 0..64u8 {
+                                if others & (1u64 << cand) == 0 {
+                                    continue;
+                                }
+                                let cs = Square::new(cand);
+                                let cm = Move::new(cs, to, mv.promotion());
+                                let mut tmp = *before;
+                                let mover = before.turn();
+                                match tmp.play(cm) {
+                                    Err(_) => report.push_str(&format!(" {cs}:rejected,")),
+                                    Ok(undo) => {
+                                        let safe =
+                                            tmp.attackers_to(tmp.king_square(mover).0, mover.other(), tmp.occupied())
+                                                == 0;
+                                        tmp.unmake_move(cm, undo);
+                                        let tag = if safe { "legal" } else { "pinned" };
+                                        report.push_str(&format!(" {cs}:{tag},"));
+                                    }
+                                }
+                            }
+                            self.examples.push(report);
+                        }
                     } else if x.as_str().len() > 3 {
                         self.stats.disambiguated += 1;
                     }
@@ -168,6 +219,10 @@ impl MoveSink for Sink {
     }
 
     fn played(&mut self, after: &Board) {
+        if self.suffix {
+            std::hint::black_box(gigachess::san::check_mate_suffix(after));
+            return;
+        }
         if self.mate {
             self.stats.moves += 1;
             if !after.in_check() {
@@ -303,6 +358,25 @@ fn main() {
         tg.as_secs_f64(),
         te.as_secs_f64(),
         tg.as_secs_f64() - te.as_secs_f64()
+    );
+
+    // 4. the absolute cost of the check/mate suffix: a pass that calls it in
+    //    `played`, against the same pass with `played` empty
+    let mut with = Sink { suffix: true, ..Default::default() };
+    let t0 = Instant::now();
+    walk(base, last, &mut with);
+    let t_suffix = t0.elapsed();
+    let mut without = Sink::default();
+    let t0 = Instant::now();
+    walk(base, last, &mut without);
+    let t_none = t0.elapsed();
+    let delta = t_suffix.as_secs_f64() - t_none.as_secs_f64();
+    println!(
+        "check/mate suffix: {:.2} s on this slice against {:.2} s without it - {:.1} ns per in-check move, about {:.1} s on a whole-database export",
+        t_suffix.as_secs_f64(),
+        t_none.as_secs_f64(),
+        delta * 1e9 / with.stats.prefilter_hits.max(1) as f64,
+        delta * (883_141_297.0 / with.stats.moves as f64)
     );
 
     println!(

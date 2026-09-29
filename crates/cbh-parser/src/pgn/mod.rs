@@ -50,15 +50,18 @@ use gigachess::{Board, Color, Move};
 /// No child of a node.
 const NONE: u32 = u32::MAX;
 
-/// The SAN body's disambiguation stays `gigachess`' movegen-based query, and
-/// that is semantics, not an implementation detail. The ancestor's cheaper
-/// per-candidate test (`chesscore`, MIT, `cbformat::pgn::san::disambiguate`)
-/// writes the same *rule* but a different *set* of hints: over 200,000 records
-/// of the reference database the two disagree on 473,226 of 13,908,447 moves,
-/// and against ChessBase's own gold export the per-candidate form matches
-/// 83,337 games against 407,350, dropping the hint in 335,990 of them.
-/// ChessBase's hints are those of a full legal-move query.
-/// `examples/san_probe.rs` measures both; `docs/format-spec.md` §11.7.
+/// The SAN body's disambiguation is `gigachess`' movegen-based query today, and
+/// it need not be: chesscore (MIT, `cbformat::pgn::san::disambiguate`) asks each
+/// candidate on its own, which is cheaper (8.1 ns per SAN body against 13.5 ns
+/// over 13.9 M moves of the reference database) and, written carefully,
+/// identical - 0 differing moves on that slice, and the same gold result
+/// (407,350 of 419,385, the same twelve thousand diffs). The two traps are the
+/// ones the study hit: the king to ask about is the *mover's* (`us`), not the
+/// side to move after the move, and a pinned candidate must be dropped, which
+/// is what the king-safety query is for. It belongs upstream in `gigachess`,
+/// which owns the SAN rule here; `examples/san_probe.rs` measures both and
+/// `docs/gigachess-san-disambiguation.patch` carries the hunk.
+/// `docs/format-spec.md` §11.7.
 ///
 /// One decoded move: its SAN and check/mate suffix inline — `gigachess` hands
 /// the body over in a fixed-size [`San`] by value, so the walk stores it in

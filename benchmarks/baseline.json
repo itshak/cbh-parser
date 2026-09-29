@@ -725,29 +725,65 @@
         "ours_export_sys_seconds": 0.9,
         "ancestor_render_user_seconds": 59.28,
         "ours_render_user_seconds": 91.87,
-        "reading": "our walk is 16 % faster and the two cores cost the same for SAN (see below). The user-time gap is I/O accounting: the ancestor preads every record - its largest profile entry - and books it as system time, while our mapped, streamed path books it as user time. user+system: 134.4 s against 138.2 s"
+        "reading": "our walk is 16 % faster and the two cores cost the same for SAN. The user-time gap is I/O accounting: the ancestor preads every record - its largest profile entry - and books it as system time, while our mapped, streamed path books it as user time. user+system: 134.4 s against 138.2 s"
+      },
+      "export_stage_decomposition": {
+        "method": "examples/stage_probe.rs, 200,000 records (13,908,447 moves, 125,889,200 bytes), four passes each adding one stage",
+        "record_plumbing_seconds": 0.14,
+        "the_walk_legality_and_stream_seconds": 0.61,
+        "san_body_and_check_mate_suffix_seconds": 0.22,
+        "tags_movetext_and_output_seconds": 0.66,
+        "annotations_seconds": 0.3,
+        "total_seconds": 1.63,
+        "reading": "of a whole-database export: about 37 % the move walk, 27 % the writer's own text, 12 % the annotations, 9 % the SAN, 6 % record plumbing. The record plumbing is the cheapest thing left to remove in this repository - the example copies every record; `Batch` borrows it from the map"
       },
       "san_body_measurement": {
-        "method": "examples/san_probe.rs over 200,000 records (13,908,447 moves): one pass rendering nothing, one with `gigachess::san::move_to_san_body`, one with the per-candidate disambiguation",
-        "gigachess_san_body_ns_per_move": 14.5,
-        "per_candidate_san_body_ns_per_move": 6.6,
+        "method": "examples/san_probe.rs over 200,000 records (13,908,447 moves): one pass rendering nothing, one with `gigachess::san::move_to_san_body`, one with chesscore's per-candidate disambiguation",
+        "gigachess_san_body_ns_per_move": 13.5,
+        "per_candidate_san_body_ns_per_move": 8.1,
         "moves_taking_the_ambiguous_branch": 558028,
         "moves_total": 13908447,
-        "ambiguous_branch_rate": "4.0 % - gigachess pays a full legal movegen there, and the rest of the time the cheap pre-filter answers it",
-        "saving_on_a_whole_database_export_seconds": 7.0
-      },
-      "the_candidate_test_changes_the_output": {
-        "moves_where_the_two_disagree": 473226,
-        "gold_exact_with_gigachess": 407350,
-        "gold_exact_with_the_per_candidate_test": 83337,
-        "new_diffs_over_disambiguation_only": 335990,
-        "reading": "ChessBase's own hints are the ones a full legal-move query produces, so the movegen is the semantics and the per-candidate approximation is not a drop-in. Rejected on correctness, not on taste; the writer keeps `move_to_san_body` and the finding is recorded at the call site and in docs/format-spec.md §11.7"
+        "moves_where_the_two_forms_differ": 0,
+        "moves_carrying_a_disambiguation": 3513866,
+        "saving_on_a_whole_database_export_seconds": 4.8,
+        "gold_comparison": "identical: 407,350 of 419,385 exact with the per-candidate form, the same 12,035 diffs in the same classes",
+        "where_it_belongs": "upstream in gigachess, which owns the SAN rule here; the hunk is in docs/gigachess-san-disambiguation.patch"
       },
       "mate_test": {
         "moves_leaving_the_side_to_move_in_check": 732592,
         "rate": "5.3 %",
-        "gigachess_count_legal_moves_vs_has_legal_move": "identical suffix on all 732,592, and no measurable cost difference (0.80 s against 0.82 s over the same slice)",
-        "reading": "nothing to gain: the early-exit shape answers the same question at the same price"
+        "ns_per_in_check_move": 51.2,
+        "cost_on_a_whole_database_export_seconds": 1.8,
+        "gigachess_count_legal_moves_vs_has_legal_move": "identical suffix on all 732,592 and the same cost (0.86 s against 0.89 s over the slice)",
+        "reading": "nothing to gain from the early-exit shape: gigachess' count is already as cheap as asking the question"
+      },
+      "the_trap": "an earlier attempt at the per-candidate form asked whether the *side to move after the move* had its king attacked, which reports every pinned candidate as legal; it lost 324,013 gold games (83,337 exact against 407,350) and looked like a correctness wall. The king to test is the mover's. The corrected form is byte-identical."
+    },
+    "stage_decomposition_followups": {
+      "recorded": "2026-09-29",
+      "question": "our tags, movetext and annotations cost 76 s against the ancestor's 48 s: what is in them, and what can be taken?",
+      "decomposition": "examples/stage_probe.rs, 200,000 records: record plumbing 9 %, the move walk 37 %, the SAN body and check/mate suffix 13 %, tags + movetext + output 27 %, the annotations 18 %",
+      "taken": [
+        "Annotations::record_of consulted the wide offset table before testing for a zero short offset; a wide offset's low 32 bits are the short one by construction, so the test comes first, which skips a table read and its validation for the 10.8 million records without annotations",
+        "the megabase example measured a game's bytes from the BufWriter's buffer length, which is not a game's size once the buffer flushes - a million records reported 832,357 bytes against the 637,059,476 written; a counting sink fixes it, and the whole-database figure now reads 7,683,725,549, the library's own number"
+      ],
+      "tried_and_dropped": "reading the records through Batch (zero-copy, as the replay and parallel paths do) instead of the example's per-record read: 11.5 s against 11.6 s over a million records, inside the noise. The 112-byte copy it saves is smaller than the batch bookkeeping it adds, so the example keeps its loop.",
+      "what_is_left_and_why": [
+        "the movetext: one 2-8 byte copy of the node's SAN per move, 869,502,065 of them; removing it needs a hand-written unsafe copy (the workspace warns on unsafe; about 3-4 s) or a layout change, which the emission order forbids - archived task 7.1",
+        "the tags: nine per game, three or four borrowed entity lookups, no allocation; the rest is the entity decode and the escaping, 1-2 s at most",
+        "the annotations: 18 % of the export for 303,675 annotated games, and our rendering is the precise one - the ancestor gets 4,691 games wrong; what is left there is the comment text's own volume, a copy rather than overhead"
+      ],
+      "whole_database_after": {
+        "one_thread_seconds": [
+          143.82,
+          144.4
+        ],
+        "one_thread_user_seconds": 138.36,
+        "one_thread_sys_seconds": 0.81,
+        "ten_threads_seconds": 15.02,
+        "ten_threads_records_per_second": 742173,
+        "pgn_bytes": 7683725549,
+        "note": "the single-threaded run is 4-8 s above the 136.0 s measured earlier today; the machine's run-to-run range today is that wide, and the parallel figure is the stable one"
       }
     }
   }

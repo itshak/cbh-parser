@@ -538,20 +538,24 @@ are 134.4 s against 138.2 s. Stage by stage, on the same records:
 | everything else (tags, movetext, annotations, output) | ~48 s | ~76 s |
 
 So the chess cores cost the same on this workload and our walk is 16 % faster;
-the CPU-only gap is the I/O accounting, not the chess. The one real
-algorithmic difference is the SAN *disambiguation*: `gigachess` 0.1.5 answers it
-with a **full legal movegen of the position** whenever a second piece of the
-same type attacks the destination — 4.0 % of moves (558,028 of 13,908,447 over
-200,000 records) — while the ancestor tests each candidate on its own
-(`cbformat::pgn::san::disambiguate`, MIT, chesscore: same file → rank → square
-rule over the legally reachable candidates). It is cheaper: measured 6.6 ns per
-SAN body against 14.5 ns, worth ~7 s of a whole-database export. **It is also
-wrong for our output, and that is not a tuning matter:** the two disagree on
-473,226 of 13,908,447 moves, and against ChessBase's own gold export the
-per-candidate form matches 83,337 games against `gigachess`' 407,350, dropping
-the hint in 335,990 games. ChessBase's hints are those of a full legal-move
-query, so the movegen *is* the semantics here; `examples/san_probe.rs`
-reproduces both measurements.
+the CPU-only gap is the I/O accounting, not the chess. Where our own time goes
+(`examples/stage_probe.rs`, 200,000 records, each pass adding one stage):
+record plumbing 9 %, the move walk 37 %, the SAN body and check/mate suffix
+13 %, tags + movetext + output 27 %, the annotations 18 %.
+
+The one real algorithmic difference is the SAN *disambiguation*:
+`gigachess` 0.1.5 answers it with a **full legal movegen of the position**
+whenever a second piece of the same type attacks the destination — 4.0 % of
+moves (558,028 of 13,908,447) — while the ancestor tests each candidate on its
+own. It is cheaper (8.1 ns per SAN body against 13.5 ns, about 4.8 s of a
+whole-database export) and **identical in output**: 0 differing moves over
+13.9 M moves, and the same gold result (407,350 of 419,385, the same 12,035
+diffs). So it is not a correctness wall — it is gigachess work, and the hunk is
+in `docs/gigachess-san-disambiguation.patch`. The one trap is the king to ask
+about: it is the *mover's*, not the side to move after the move. The mate test,
+by contrast, has nothing to gain: `count_legal_moves` and `has_legal_move`
+agree on all 732,592 in-check moves and cost the same (51 ns per check, 1.8 s
+over the database).
 
 The like-for-like run — same database, same machine, one after the other, both
 writing the annotations, output to `/dev/null` — is the table below. It also

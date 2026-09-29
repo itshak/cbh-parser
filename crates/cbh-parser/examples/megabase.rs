@@ -197,7 +197,6 @@ fn run(
     let entities = Entities::open(base).expect("entities");
     let cbg = DbFile::open(cbg_path.clone()).expect("cbg");
     let total = headers.records();
-    let mut header_buf = vec![0u8; 46 * 160];
     let mut record_buf = Vec::with_capacity(1 << 20);
     let mut buf = cbh_chess::tree::MovesBuf::with_capacity(512);
     let mut counting = Counter::default();
@@ -205,10 +204,13 @@ fn run(
     if decode_only && (pgn_out.is_some() || sample_out.is_some()) {
         eprintln!("--decode-only ignores outputs");
     }
-    let mut pgn_sink: Option<BufWriter<File>> = if decode_only {
+    let mut pgn_sink: Option<Counted<BufWriter<File>>> = if decode_only {
         None
     } else {
-        pgn_out.map(|p| BufWriter::with_capacity(pgn_buffer, File::create(p).expect("pgn-out")))
+        pgn_out.map(|p| Counted {
+            inner: BufWriter::with_capacity(pgn_buffer, File::create(p).expect("pgn-out")),
+            bytes: 0,
+        })
     };
     // `--threads` above one exports through the Rayon pipeline: the same bytes,
     // written in record order (`pgn-export-sota-performance` task 5.3).
@@ -252,6 +254,7 @@ fn run(
         |id: u32| id <= 2 || (2_601_298..=2_601_308).contains(&id) || id == 2_602_603 || id > total.saturating_sub(2);
     let t0 = Instant::now();
     let mut id = 1u32;
+    let mut header_buf = vec![0u8; 46 * 160];
     while id <= upto {
         let n = headers.read_records(id, 160, &mut header_buf).expect("batch");
         if n == 0 {
@@ -266,8 +269,8 @@ fn run(
                 &cbg,
                 &cbg_path,
                 &entities,
-                &mut record_buf,
                 &mut buf,
+                &mut record_buf,
                 &mut counting,
                 &mut writer,
                 &annotations,
@@ -334,20 +337,42 @@ fn run(
 }
 
 #[allow(clippy::too_many_arguments)]
+/// A `Write` that counts the bytes it has taken: `BufWriter`'s buffer length is
+/// not a game's size, because the buffer flushes whenever it fills.
+struct Counted<W> {
+    inner: W,
+    bytes: u64,
+}
+
+impl<W: Write> Write for Counted<W> {
+    #[inline]
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let n = self.inner.write(buf)?;
+        self.bytes += n as u64;
+        Ok(n)
+    }
+
+    #[inline]
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.inner.flush()
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 fn one(
     rec_id: u32,
     bytes: &[u8],
     cbg: &DbFile,
     cbg_path: &Path,
     entities: &Entities,
-    record_buf: &mut Vec<u8>,
     buf: &mut cbh_chess::tree::MovesBuf,
+    record_buf: &mut Vec<u8>,
     counting: &mut Counter,
     writer: &mut PgnWriter,
     annotations: &Annotations,
     wide: Option<&Wide>,
     ann_scratch: &mut Vec<u8>,
-    pgn_sink: Option<&mut BufWriter<File>>,
+    pgn_sink: Option<&mut Counted<BufWriter<File>>>,
     sample_sink: Option<&mut BufWriter<File>>,
     is_sample: &dyn Fn(u32) -> bool,
     games: &mut u64,
@@ -477,9 +502,9 @@ fn one(
                 None
             }
         };
-        let before = out.buffer().len() as u64;
+        let before = out.bytes;
         match writer.write_game(out, &header, entities, &game, anns.as_ref()) {
-            Ok(()) => *pgn_bytes += out.buffer().len() as u64 - before,
+            Ok(()) => *pgn_bytes += out.bytes - before,
             Err(e) => {
                 if failures.len() < 50 {
                     failures.push(format!("game {rec_id}: pgn: {e}"));
