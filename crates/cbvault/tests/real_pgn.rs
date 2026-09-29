@@ -9,8 +9,8 @@ use cbvault_format::cbh::moves::GameMoves;
 use cbvault_format::cbh::{Entities, GameHeader, Headers};
 use cbvault_format::file::DbFile;
 use cbvault_format::game::RecordKind;
-use gigachess::{Board, Move};
 use gigachess::san::san_to_move;
+use gigachess::{Board, Move};
 
 /// The base path of the set to check, or `None` when it is not on this machine.
 fn database() -> Option<PathBuf> {
@@ -49,9 +49,7 @@ fn start_of(pgn: &str) -> Board {
 /// hands the pass to the board as an ordinary `Move::NULL`, so the replayer
 /// plays it the same way through the same entry point, then replays on.
 fn through_null(board: &mut Board, before_last: &mut Board) {
-    board
-        .play(Move::NULL)
-        .expect("the writer only emits a null move outside check");
+    board.play(Move::NULL).expect("the writer only emits a null move outside check");
     *before_last = *board;
 }
 

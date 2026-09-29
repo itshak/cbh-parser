@@ -31,7 +31,7 @@ mod comments;
 
 /// The parallel export pipeline (Rayon, record-ordered output).
 pub mod parallel;
-pub use parallel::{DEFAULT_BATCH, ExportStats, export_parallel, export_range};
+pub use parallel::{DEFAULT_BATCH, ExportStats, export_parallel, export_range, export_range_from, export_span};
 
 use std::io::{self, Write};
 

@@ -13,7 +13,7 @@
 use std::io::{BufWriter, Write};
 use std::path::Path;
 
-use cbvault_chess::decode::{start_as_played, walk_from, GameRef, MoveSink, NULL_MOVE};
+use cbvault_chess::decode::{GameRef, MoveSink, NULL_MOVE, start_as_played, walk_from};
 use cbvault_format::cbh::{Batch, Headers};
 use cbvault_format::file::DbFile;
 use cbvault_format::game::RecordKind;
@@ -81,11 +81,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             };
             let at = u64::from(header.moves_offset());
             let what = GameRef::at(header.id(), at);
-            let mut sink = Mainline {
-                words: Vec::new(),
-                start_fen: None,
-                nulls: 0,
-            };
+            let mut sink = Mainline { words: Vec::new(), start_fen: None, nulls: 0 };
             let start = match start_as_played(what, &game) {
                 Ok(s) => s,
                 Err(_) => {

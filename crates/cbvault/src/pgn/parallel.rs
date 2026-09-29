@@ -52,7 +52,7 @@ pub struct ExportStats {
 /// the sequential export's.
 pub fn export_parallel(
     base: &Path,
-    out: &mut (impl Write + Send),
+    out: &mut impl Write,
     threads: usize,
     batch_size: u32,
     failure_limit: usize,
@@ -66,10 +66,42 @@ pub fn export_parallel(
 /// database.
 pub fn export_range(
     base: &Path,
-    out: &mut (impl Write + Send),
+    out: &mut impl Write,
     threads: usize,
     batch_size: u32,
     failure_limit: usize,
+    last: u32,
+) -> Result<ExportStats> {
+    export_span(base, out, threads, batch_size, failure_limit, 1, last)
+}
+
+/// [`export_span`], named for the common case: everything from the first record
+/// up to `last`.
+pub fn export_range_from(
+    base: &Path,
+    out: &mut impl Write,
+    threads: usize,
+    batch_size: u32,
+    failure_limit: usize,
+    first: u32,
+    last: u32,
+) -> Result<ExportStats> {
+    export_span(base, out, threads, batch_size, failure_limit, first, last)
+}
+
+/// Writes the records `first..=last` in record order. Ids are 1-based; a `last`
+/// of 0 or below means "to the end", and a `first` of 0 or below is clamped to
+/// 1, so a caller can pass an unset value straight through.
+///
+/// The output is byte-for-byte the sequential export's over the same span: a
+/// range is a slice of the same stream, not a differently-shaped one.
+pub fn export_span(
+    base: &Path,
+    out: &mut impl Write,
+    threads: usize,
+    batch_size: u32,
+    failure_limit: usize,
+    first: u32,
     last: u32,
 ) -> Result<ExportStats> {
     let headers = Headers::open(base)?;
@@ -81,9 +113,10 @@ pub fn export_range(
     let total = headers.records();
 
     let batch = if batch_size == 0 { DEFAULT_BATCH } else { batch_size };
+    let first = first.max(1);
     let last = if last == 0 { total } else { last.min(total) };
     let mut chunks: Vec<(u32, u32)> = Vec::new();
-    let mut id = 1u32;
+    let mut id = first;
     while id <= last {
         let end = id.saturating_add(batch - 1).min(last);
         chunks.push((id, end));
