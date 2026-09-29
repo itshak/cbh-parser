@@ -9,12 +9,15 @@ use std::process::ExitCode;
 use std::time::Instant;
 
 use cbvault::replay::verify_parallel;
+use cbvault_format::archive::{Archive, Member};
 use cbvault_format::cbh::{Entities, Headers};
 
 const USAGE: &str = "usage:
   cbvault info   <db> [--games N] [--json]
   cbvault verify <db> [--threads N] [--batch-size N] [--limit-failures N] [--json]
   cbvault pgn    <db> [out] [--from ID] [--to ID] [--threads N] [--batch-size N] [--json]
+  cbvault archive list <archive> [--json]
+  cbvault archive extract <archive> <dir> [--only NAME] [--json]
 
 The PGN goes to `out`, or to stdout when no path is given, so it can be piped.
 The export report always goes to stderr, so stdout stays pure PGN.
@@ -36,6 +39,7 @@ fn main() -> ExitCode {
         "info" => run_info(args),
         "verify" => run_verify(args),
         "pgn" => run_pgn(args),
+        "archive" => run_archive(args),
         _ => {
             eprintln!("{USAGE}");
             return ExitCode::from(2);
@@ -190,6 +194,169 @@ fn run_verify(mut args: impl Iterator<Item = String>) -> Result<bool, Box<dyn st
 /// and the library cannot disagree about what the export produces. Writing to a
 /// path streams straight to the file; with no path (or `-`) the PGN goes to
 /// stdout, which is what piping into another tool wants.
+/// `cbvault archive list <archive> [--json]` — every member, with its sizes.
+///
+/// A thin wrapper over [`Archive::list`]: the sizes come from the table, not from
+/// decoding, so listing a 1.7 GB archive is a table read and never touches the
+/// data pool. That is worth stating, because it is the property that makes listing
+/// usable on a database far larger than memory.
+fn run_archive_list(mut args: impl Iterator<Item = String>) -> Result<bool, Box<dyn std::error::Error>> {
+    let mut path: Option<String> = None;
+    let mut json = false;
+    for arg in args.by_ref() {
+        match arg.as_str() {
+            "--json" => json = true,
+            other if !other.starts_with('-') && path.is_none() => path = Some(other.to_string()),
+            _ => return Err(USAGE.into()),
+        }
+    }
+    let path = path.ok_or(USAGE)?;
+    let archive = Archive::open(&path)?;
+
+    if json {
+        let members: Vec<String> = archive
+            .list()
+            .iter()
+            .map(|m| {
+                format!(
+                    "{{\"name\":{},\"size\":{},\"packed\":{},\"offset\":{},\"decodable\":{}}}",
+                    json_str(m.name()),
+                    m.size(),
+                    m.packed(),
+                    m.offset(),
+                    archive.can_decode(m).unwrap_or(false),
+                )
+            })
+            .collect();
+        println!(
+            "{{\"archive\":{},\"members\":{},\"list\":[{}]}}",
+            json_str(&path),
+            archive.list().len(),
+            members.join(",")
+        );
+    } else {
+        let decodable = archive.list().iter().filter(|m| archive.can_decode(m).unwrap_or(false)).count();
+        println!("archive        {path}");
+        println!("members        {}", archive.list().len());
+        println!("decodable      {decodable} (this build)");
+        for m in archive.list() {
+            // `?` marks a member this build cannot decode. It is marked rather
+            // than hidden, so a listing never implies the archive is fully
+            // readable when it is not.
+            let flag = if archive.can_decode(m).unwrap_or(false) { " " } else { "?" };
+            println!("{flag} {:>12} {:>12}  {}", m.size(), m.packed(), m.name());
+        }
+    }
+    Ok(true)
+}
+
+/// Minimal JSON string escaping for the two fields that need it (a member name
+/// and an error string). Written out rather than pulled in as a dependency: the
+/// CLI's contract is a stable `--json` shape, not a general JSON library.
+fn json_str(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+/// `cbvault archive extract <archive> <dir> [--only NAME] [--json]`
+///
+/// Writes the members this build can decode and **refuses the rest**, rather than
+/// writing bytes it did not decode. On the reference archive that is 2,228 of
+/// 3,871 members: the block framing of modes 1, 2 and 3 is not yet identified and
+/// cannot be invented, and a database that is silently three-fifths present is
+/// worse than one that is visibly short. Exits non-zero when anything was
+/// skipped, so a script cannot mistake a partial extraction for a whole one.
+fn run_archive_extract(mut args: impl Iterator<Item = String>) -> Result<bool, Box<dyn std::error::Error>> {
+    let mut path: Option<String> = None;
+    let mut dir: Option<String> = None;
+    let mut only: Option<String> = None;
+    let mut json = false;
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--only" => only = Some(args.next().ok_or("--only requires a member name")?),
+            "--json" => json = true,
+            other if !other.starts_with('-') => {
+                if path.is_none() {
+                    path = Some(other.to_string());
+                } else if dir.is_none() {
+                    dir = Some(other.to_string());
+                } else {
+                    return Err(USAGE.into());
+                }
+            }
+            _ => return Err(USAGE.into()),
+        }
+    }
+    let (path, dir) = (path.ok_or(USAGE)?, dir.ok_or(USAGE)?);
+    let archive = Archive::open(&path)?;
+    let dir = std::path::Path::new(&dir);
+
+    let wanted: Vec<&Member> = match &only {
+        None => archive.list().iter().collect(),
+        Some(name) => {
+            let m = archive.find(name).ok_or_else(|| format!("no member named {name:?}"))?;
+            vec![m]
+        }
+    };
+
+    let mut written = 0u64;
+    let mut bytes = 0u64;
+    let mut skipped: Vec<String> = Vec::new();
+    for m in &wanted {
+        // Decode then write, rather than `Archive::extract`, so one undecodable
+        // member does not stop the run: the point of reporting per member is to
+        // say exactly which ones are missing.
+        match archive.decode(m) {
+            Ok(content) => match archive.write(dir, m, &content) {
+                Ok(p) => {
+                    written += 1;
+                    bytes += m.size();
+                    if !json {
+                        println!("wrote {}", p.display());
+                    }
+                }
+                Err(e) => skipped.push(format!("{}: {e}", m.name())),
+            },
+            Err(e) => skipped.push(format!("{}: {e}", m.name())),
+        }
+    }
+
+    if json {
+        let items: Vec<String> = skipped.iter().map(|s| json_str(s)).collect();
+        println!("{{\"written\":{written},\"bytes\":{bytes},\"skipped\":[{}]}}", items.join(","));
+    } else {
+        println!("wrote {written} members ({bytes} bytes)");
+        if !skipped.is_empty() {
+            println!("skipped {} member(s) this build cannot decode:", skipped.len());
+            for s in &skipped {
+                println!("  {s}");
+            }
+            println!("see docs/format-spec-cbv.md — modes 1, 2 and 3 are not yet identified");
+        }
+    }
+    Ok(skipped.is_empty())
+}
+
+fn run_archive(mut args: impl Iterator<Item = String>) -> Result<bool, Box<dyn std::error::Error>> {
+    match args.next().as_deref() {
+        Some("list") => run_archive_list(args),
+        Some("extract") => run_archive_extract(args),
+        _ => Err(USAGE.into()),
+    }
+}
+
 fn run_pgn(mut args: impl Iterator<Item = String>) -> Result<bool, Box<dyn std::error::Error>> {
     let mut db_path: Option<String> = None;
     let mut out_path: Option<String> = None;

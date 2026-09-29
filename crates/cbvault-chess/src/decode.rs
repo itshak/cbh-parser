@@ -232,11 +232,7 @@ impl<S: MoveSink> Walker<'_, S> {
             return Err(self.fail(if mv.is_null() {
                 "null move in check".to_string()
             } else {
-                format!(
-                    "illegal move {}-{} (word {code:#06x})",
-                    square_text(mv.from()),
-                    square_text(mv.to())
-                )
+                format!("illegal move {}-{} (word {code:#06x})", square_text(mv.from()), square_text(mv.to()))
             }));
         }
         // A pass moves no piece, so the piece lists are unchanged and must not be

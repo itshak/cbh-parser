@@ -1,0 +1,137 @@
+# Changelog
+
+All notable changes to **cbvault** will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+The project is pre-1.0 and **not yet published to crates.io**. The version
+below is the in-tree workspace version, not a release.
+
+---
+
+## [0.1.0] - unreleased
+
+The first public shape of the library. It is a **work in progress**: the classic
+`.cbh` family is read and exported, the `.cbv` container is parsed, and 2CBH
+yields tags but no moves. `README.md` § "What is not supported yet" is the
+authoritative list of what is missing.
+
+### Added
+
+- **The consumer façade** (`cbvault::bridge`). `Database::open` takes a base name or
+  any member file, resolves siblings case-insensitively, validates the mandatory
+  set (`.cbh .cbg .cba .cbp .cbt .cbc .cbs`) and reports the generation, the record
+  count and which optional members were found. `Database::headers` lists games
+  from `.cbh` and the namebases alone and **never opens the moves file**; asserted
+  two ways, by renaming `.cbg` away after open and for a tag scan.
+- **A sink-based conversion contract.** `GameSink` declares once per run what it
+  needs (`wants_keys`, `wants_annotations`) and is then handed one entirely borrowed
+  `GameRef` per game in ascending game-number order. `for_each_game` walks
+  sequentially; `convert_parallel` cuts the id space into 8,192-record chunks and
+  has one writer stage deliver them **in id order**, so the sink sees the same
+  games, in the same order, with the same payloads, at one thread or ten — asserted
+  over 4,096 fixture games at 1, 2, 3 and 10 threads and batch sizes 1, 7 and
+  8,192. A sink that only counts games reaches the allocator **zero times per
+  game**, asserted with a per-thread counting allocator.
+- **Tag search over the raw set.** `Entities::find_player` and friends resolve a
+  name to an id once; `scan` / `scan_range` then compare that id per record and
+  return matches in ascending game order. ChessBase's tournament namebase is not a
+  valid BST, so a descent that misses falls back to a verified scan of the 10 MB
+  `.cbt`; `Found::via` says which path answered.
+- **Position search, unindexed.** `for_each_position_key` replays the source and
+  reports where a Polyglot key occurs, in parallel, with `PositionQuery::every`
+  for progress and `PositionQuery::cancel_with` for a cancel that takes effect
+  within one chunk. Measured at 19.9 M plies/s on one thread, 109.6 M/s on ten.
+- **The `cbvault` CLI** with four commands: `info`, `verify`, `pgn` and
+  `archive list` / `archive extract`, all with stable `--json`. The PGN report
+  always goes to stderr so stdout stays pure PGN.
+- **PGN export**, sequential and Rayon-parallel, byte-identical either way.
+  `export_parallel`, `export_range`, `export_range_from` and `export_span`.
+  **407,350 of 419,385 games match a ChessBase export byte for byte (97.1 %)**;
+  §10 of `docs/format-spec.md` lists the five deliberate deviations.
+- **`.cbv` archive container.** Magic, the 173-byte member table, the
+  self-describing member count derived from the geometry, per-record validation
+  against the table's own redundant 32/64-bit copies, the five-byte stream head
+  and the compression mode byte. Listing touches no part of the data pool.
+- **Stored-mode extraction.** Mode `0x00` decodes and is verified on 2,228 of the
+  reference archive's 3,871 members (57.6 %). The other three modes report
+  `Error::CodecUnavailable` and are never written to disk.
+- **A 2CBH reader** (`cbvault_format::twocbh`): fixed 192-byte records, headers,
+  annotations, and record framing verified over 220,418 records with zero
+  violations. `GameMoves::is_decoded()` is `false` by design — the move codec is
+  not decoded, so no `moves2` is fabricated from it.
+- **DES (FIPS 46-3)** implemented and checked against the standard's published
+  test vectors, so the primitive is provable without a `.cbz` sample.
+- **The test-only fixture builder** (`cbvault-fixtures`, `publish = false`), so
+  the format round-trips are exercised in CI with no real database.
+
+
+### Changed
+
+- **The chess core is `gigachess` and only `gigachess`.** The ported ancestor's
+  `chesscore` layer was replaced wholesale: move generation, legality, FEN/SAN/UCI,
+  Chess960 and incremental Polyglot Zobrist all come from `gigachess`, and the
+  internal move currency is its 16-bit `moves2`. A CI job fails the build if a
+  second chess implementation appears in the tree.
+- **Moved to `gigachess` 0.1.9 and let the engine own the null move**, so a CBH
+  pass (`0xffff` in the `moves2` stream) is handled by `Move::NULL` rather than by
+  cbvault code.
+- **The walk dispatches on what the sink asked for**, not per game: no keys means
+  the fast `play_fast` make, keys means the hash-maintaining `play_hashed`,
+  annotations off means `.cba` is never opened. Asking for keys costs 4–8 % of a
+  pass, which is roughly 12× cheaper than the second pass it replaces.
+- **The PGN export was optimised** from 171.9 s (64,899 records/s) to
+  128.1–130.0 s (87,029 records/s) single-threaded, and to 19.7–20.6 s at ten
+  threads, for byte-identical output — the SAN body inlined into its node, no
+  per-game `String` or `Vec`, one buffer and one `write_all` per game, tag heads
+  as string literals, and an ASCII fast path in the name buffer.
+- **The project is named `cbvault`**, including every crate, path, binary, env var
+  and document. Format names keep their `cbh` spelling (`cbvault_format::cbh`).
+
+### Fixed
+
+- **A stale-cache bug in the fast make**, where a pass turn was validated against
+  a `checkers` value `play_fast` had left behind. Fixed in `gigachess` and
+  adopted here.
+- **SAN over-disambiguation**, which was placing a file or rank hint on every
+  candidate. The writer now emits the minimal qualifier per the SAN standard,
+  verified equivalent to the per-candidate test over 13,908,447 moves with zero
+  differences. Gold parity is unchanged.
+- **`is_legal` on a null move** was answered by the wrong question, testing the
+  opponent's king; it now has a dedicated branch upstream.
+
+### Known limitations
+
+These are real and are not fixed; each is described in `README.md` § "What is not
+supported yet".
+
+- **The `.cbv` compression codec is unsolved.** Only mode `0x00` (2,228 of 3,871
+  members) decodes; modes 1 (68), 2 (58) and 3 (1,517) do not. Around 6,000
+  candidate LZ grammars were swept and none reproduces the smallest exact pair.
+- **`.cbz` is not implemented.** No sample has ever existed on the development
+  machine, so the DES key derivation, the chaining mode and the password check are
+  unverified and deliberately unimplemented rather than guessed.
+- **The 2CBH `.2cbg` move codec is not decoded**, and a specific list of 2CBH
+  header fields remains unknown. A 2CBH database yields tags and annotations but
+  no `moves2`.
+- **`Database::open` refuses a 2CBH set** with a typed `MissingFile`; reading 2CBH
+  behind the same façade and the same sink is not done.
+- **A game with variations costs one allocation each**, in the decoder's per-game
+  variation stack.
+- **`Filter` has no "starts from a set-up position" predicate**; the bit is in the
+  move record and a tag search does not open the moves file.
+- **No fuzzing has been done, no crate is published to crates.io**, and the
+  `.cbv` container layout is verified on a single archive.
+
+### Notes
+
+- **No licensed database content is in this repository.** The performance figures
+  in `README.md` come from an 11.1 M-record ChessBase set the maintainer holds a
+  licence for. Every test that needs it is gated on an environment variable and
+  skips with a visible "this test did not run; it did not pass" message, so CI is
+  never silently green for want of data. Database paths are git-ignored.
+- **Read-only, permanently.** cbvault never opens a source file for writing, never
+  creates or deletes anything in a database's directory, and never writes bytes it
+  did not decode. It is not affiliated with, endorsed by or connected to ChessBase;
+  ChessBase formats are the input and the implementation is original.

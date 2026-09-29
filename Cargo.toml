@@ -14,7 +14,13 @@ gigachess = "0.1.9"
 cbvault-format = { version = "0.1.0", path = "crates/cbvault-format" }
 cbvault-chess = { version = "0.1.0", path = "crates/cbvault-chess" }
 cbvault = { version = "0.1.0", path = "crates/cbvault" }
-cbvault-fixtures = { version = "0.1.0", path = "crates/cbvault-fixtures" }
+# Path-only on purpose. `cbvault-fixtures` is `publish = false`, so it will never
+# exist on crates.io — and a dev-dependency that carries a version requirement
+# makes cargo resolve it from the registry when preparing a package for upload,
+# which fails every publish with "no matching package named `cbvault-fixtures`
+# found". A dev-dependency is not part of a consumer's dependency graph anyway, so
+# there is nothing for a version to constrain.
+cbvault-fixtures = { path = "crates/cbvault-fixtures" }
 rayon = "1.10"
 memmap2 = "0.9"
 

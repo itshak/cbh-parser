@@ -269,11 +269,7 @@ fn null_move_alias_is_the_engine_word() {
     // of check, illegal in it, and never offered as a legal move. The position
     // is reached by playing, so the claim is about the position rather than a
     // hand-built FEN.
-    let f2f3 = Move::new(
-        Square::from_alg("f2").expect("f2"),
-        Square::from_alg("f3").expect("f3"),
-        None,
-    );
+    let f2f3 = Move::new(Square::from_alg("f2").expect("f2"), Square::from_alg("f3").expect("f3"), None);
     let mut board = gigachess::Board::startpos();
     board.play(f2f3).expect("f2f3 is legal");
     assert!(!board.in_check());

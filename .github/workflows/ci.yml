@@ -2,32 +2,85 @@ name: CI
 
 on:
   push:
+    branches: [ "main" ]
   pull_request:
+    branches: [ "main" ]
 
 env:
   CARGO_TERM_COLOR: always
-  RUSTFLAGS: -D warnings
 
 jobs:
-  build-and-test:
-    name: fmt, clippy, test
-    runs-on: ubuntu-latest
+  check-and-test:
+    name: Check & Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        rust: [stable]
     steps:
       - uses: actions/checkout@v4
-      - name: Toolchain
-        run: rustup toolchain install stable --profile minimal --component rustfmt,clippy
-      - name: Formatting
-        run: cargo fmt --check
-      - name: Lints
-        run: cargo clippy --all-targets -- -D warnings
-      - name: Tests
-        run: cargo test
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.rust }}
+          components: clippy, rustfmt
+
+      - name: Verify toolchain satisfies rust-version
+        run: |
+          # rust-toolchain.toml pins the channel, but it cannot stop a runner
+          # whose `stable` predates the workspace `rust-version`. Edition 2024
+          # and the ported cbformat code need 1.88+; without this check an old
+          # runner fails deep inside a build with a confusing parse error
+          # instead of one clear line naming the version it needs.
+          required=$(cargo metadata --no-deps --format-version 1 \
+            | jq -r '[.packages[].rust_version] | map(select(. != null)) | unique | join(",")')
+          have=$(rustc --version | awk '{print $2}')
+          echo "Required rust-version: $required"
+          echo "Runner rustc: $have"
+          if [ -z "$required" ]; then
+            echo "::notice::no rust-version is declared; skipping the MSRV check."
+            exit 0
+          fi
+          for want in ${required//,/ }; do
+            oldest=$(printf '%s\n%s\n' "$want" "$have" | sort -V | head -1)
+            if [ "$oldest" != "$want" ]; then
+              echo "::error::runner rustc $have is older than the required rust-version $want."
+              echo "::error::bump the matrix toolchain, or lower rust-version if it is wrong."
+              exit 1
+            fi
+          done
+
+      - name: Cache Cargo Dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Cargo check (all targets)
+        run: cargo check --all-targets
+
+      - name: Cargo check (all features)
+        run: cargo check --all-targets --all-features
+
+      # -D warnings is the gate: a new lint must be a deliberate decision, not
+      # a warning nobody reads in a collapsed log.
+      - name: Cargo clippy
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+      - name: Cargo test (all features)
+        run: cargo test --all-features
+
+      - name: Cargo fmt
+        run: cargo fmt --all --check
+
+      - name: Benchmark compilation check
+        run: cargo check --benches --all-features
 
   one-chess-core:
     name: no chesscore / shakmaty
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - name: Fail on a second chess implementation
         run: |
           # gigachess is the only chess core in this tree. `chesscore` and

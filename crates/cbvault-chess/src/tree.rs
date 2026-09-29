@@ -99,9 +99,7 @@ impl MovesBuf {
 
     /// Whether move `i` is a pass.
     pub fn is_null(&self, i: usize) -> bool {
-        self.moves
-            .get(i)
-            .is_some_and(|w| Move::from_word(*w).is_null())
+        self.moves.get(i).is_some_and(|w| Move::from_word(*w).is_null())
     }
 }
 

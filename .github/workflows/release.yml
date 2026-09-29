@@ -1,0 +1,180 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    name: Build, Test & Publish to crates.io
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Verify Tag matches Cargo.toml version
+        id: version
+        run: |
+          # The version lives in [workspace.package], and the root manifest is a
+          # *virtual* manifest, so `cargo read-manifest` cannot be used here: it
+          # errors with "manifest path is a virtual manifest" (and is deprecated
+          # in favour of `cargo metadata`). Read the version out of metadata
+          # instead, and require every member to agree so a partial version bump
+          # cannot ship.
+          TAG_VERSION="${GITHUB_REF#refs/tags/v}"
+          CARGO_VERSIONS=$(cargo metadata --no-deps --format-version 1 \
+            | jq -r '[.packages[].version] | unique | join(",")')
+          echo "Tag version: $TAG_VERSION"
+          echo "Cargo version: $CARGO_VERSIONS"
+          if [ "$TAG_VERSION" != "$CARGO_VERSIONS" ]; then
+            echo "::error::Tag version ($TAG_VERSION) does not match Cargo.toml version ($CARGO_VERSIONS)"
+            exit 1
+          fi
+          echo "VERSION=$TAG_VERSION" >> $GITHUB_OUTPUT
+
+      - name: Resolve publish order
+        id: order
+        run: |
+          # cbvault is a workspace, so there is no single `cargo publish`. The
+          # publishable crates depend on each other, and a dependent crate can
+          # only be published once its dependency is on crates.io, so the order
+          # must be topological. Derive it from `cargo metadata` rather than
+          # hardcoding it, so adding a crate cannot silently break the release.
+          #
+          # `publish = false` members (cbvault-fixtures) are excluded: they are
+          # never shipped and cargo would refuse them anyway.
+          meta=$(cargo metadata --no-deps --format-version 1)
+          edges=$(printf '%s' "$meta" | jq -r '
+            [ .packages[] | select(.publish != [])
+              | { name: .name,
+                  deps: [ .dependencies[]
+                          | select(.path != null and (.kind == null))
+                          | .name ] } ]
+            | map("\(.name)|\(.deps | sort | join(","))") | .[]')
+          if [ -z "$edges" ]; then
+            echo "::error::no publishable crate found in the workspace."
+            exit 1
+          fi
+          publishable=$(printf '%s\n' $edges | cut -d'|' -f1 | sort)
+          order=""
+          remaining="$edges"
+          while [ -n "$remaining" ]; do
+            progress=0
+            for entry in $remaining; do
+              crate="${entry%%|*}"
+              deps="${entry#*|}"
+              ready=1
+              # Only *normal* intra-workspace deps gate the order: a dev-dep does
+              # not have to exist on crates.io for the dependent to publish.
+              if [ -n "$deps" ]; then
+                for dep in ${deps//,/ }; do
+                  if printf '%s\n' $publishable | grep -qx "$dep" \
+                     && ! printf '%s\n' $order | grep -qx "$dep"; then
+                    ready=0
+                    break
+                  fi
+                done
+              fi
+              if [ "$ready" = 1 ]; then
+                order="${order:+$order }$crate"
+                remaining=$(printf '%s\n' $remaining | grep -v "^${crate}|" || true)
+                progress=1
+              fi
+            done
+            if [ "$progress" = 0 ]; then
+              echo "::error::could not resolve a publish order; unresolved: $remaining"
+              exit 1
+            fi
+          done
+          echo "Publish order: $order"
+          echo "ORDER=$order" >> $GITHUB_OUTPUT
+      - name: Extract changelog for this version
+        id: changelog
+        run: |
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          if [ -f CHANGELOG.md ]; then
+            CHANGELOG=$(awk "/^## \[${VERSION}\]/{flag=1; next} /^## \[/{flag=0} flag" CHANGELOG.md)
+          else
+            CHANGELOG="Release v${VERSION}"
+          fi
+          echo "CHANGELOG<<EOF" >> $GITHUB_OUTPUT
+          echo "$CHANGELOG" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Verify Tests Pass
+        run: cargo test --all-features
+
+      - name: Dry-Run Publish
+        run: |
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          for crate in ${{ steps.order.outputs.ORDER }}; do
+            echo "::group::Dry-run $crate $VERSION"
+            cargo publish -p "$crate" --dry-run
+            echo "::endgroup::"
+          done
+      - name: Publish to crates.io
+        run: |
+          if [ -z "${{ secrets.CARGO_REGISTRY_TOKEN }}" ]; then
+            echo "::error::CARGO_REGISTRY_TOKEN secret is not set in GitHub repository settings."
+            exit 1
+          fi
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          # crates.io requires a User-Agent and answers 403 without one. Without
+          # this header every lookup below "fails", which looks exactly like "not
+          # published yet" and would turn a re-run into a red build.
+          UA="cbvault-release (https://github.com/itshak/cbvault)"
+
+          published() { # crate version -> success when that exact version is live
+            curl -sf -A "$UA" "https://crates.io/api/v1/crates/$1/$2" >/dev/null
+          }
+
+          wait_for_index() { # the next crate cannot resolve a dep until it lands
+            local crate="$1" ver="$2" tries=30
+            while [ "$tries" -gt 0 ]; do
+              if published "$crate" "$ver"; then
+                echo "$crate $ver is visible in the crates.io index"
+                return 0
+              fi
+              tries=$((tries - 1))
+              sleep 10
+            done
+            echo "::error::$crate $ver did not appear in the crates.io index in time"
+            return 1
+          }
+
+          for crate in ${{ steps.order.outputs.ORDER }}; do
+            # crates.io versions are immutable and there is no "unpublish", only
+            # "yank", so re-running a tag's workflow (a moved or re-pushed tag)
+            # would otherwise fail on a version that is already out. Treat an
+            # already-present version as done and say so plainly rather than
+            # reporting a failure that needs no action. Skipping per crate rather
+            # than exiting the job is what lets a partially-published workspace
+            # release finish the crates that are still missing.
+            if published "$crate" "$VERSION"; then
+              echo "::notice::$crate $VERSION is already on crates.io; skipping it."
+              continue
+            fi
+            echo "::group::Publishing $crate $VERSION"
+            cargo publish -p "$crate"
+            echo "::endgroup::"
+            wait_for_index "$crate" "$VERSION"
+          done
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: v${{ steps.version.outputs.VERSION }}
+          body: ${{ steps.changelog.outputs.CHANGELOG }}
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
