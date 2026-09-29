@@ -50,6 +50,16 @@ use gigachess::{Board, Color, Move};
 /// No child of a node.
 const NONE: u32 = u32::MAX;
 
+/// The SAN body's disambiguation stays `gigachess`' movegen-based query, and
+/// that is semantics, not an implementation detail. The ancestor's cheaper
+/// per-candidate test (`chesscore`, MIT, `cbformat::pgn::san::disambiguate`)
+/// writes the same *rule* but a different *set* of hints: over 200,000 records
+/// of the reference database the two disagree on 473,226 of 13,908,447 moves,
+/// and against ChessBase's own gold export the per-candidate form matches
+/// 83,337 games against 407,350, dropping the hint in 335,990 of them.
+/// ChessBase's hints are those of a full legal-move query.
+/// `examples/san_probe.rs` measures both; `docs/format-spec.md` §11.7.
+///
 /// One decoded move: its SAN and check/mate suffix inline — `gigachess` hands
 /// the body over in a fixed-size [`San`] by value, so the walk stores it in
 /// the node without a copy, and there is no shared text buffer to grow or to

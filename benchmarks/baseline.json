@@ -712,6 +712,43 @@
         "with the annotations back, the single-threaded export measured 180.6 s: passing `Some(&anns)` for every game routed 10.8 million annotation-free games through the annotation machinery (an index build and two note lookups per move). An empty record writes nothing anywhere, so `write_game` now treats one as no annotations at all: 180.6 s -> 136.0 s, ten threads 20.1 s -> 16.2 s, with the same bytes (verified on a 200,000-record prefix and by the gold harness).",
         "The archived change's single-threaded win was measured through the first bug, so its 138.5 s against the ancestor's 141.5 s compared our annotation-free export with the ancestor's annotated one. The corrected comparison is in this entry."
       ]
+    },
+    "san_disambiguation_study": {
+      "recorded": "2026-09-29",
+      "question": "the ancestor's user time is 22 % below ours: is that the chess core, and can we take their SAN disambiguation?",
+      "stage_comparison_whole_database_one_thread": {
+        "ancestor_walk_only_cbtool_verify_user_seconds": 49.58,
+        "ours_walk_only_decode_only_user_seconds": 41.65,
+        "ancestor_export_user_seconds": 108.86,
+        "ancestor_export_sys_seconds": 29.34,
+        "ours_export_user_seconds": 133.52,
+        "ours_export_sys_seconds": 0.9,
+        "ancestor_render_user_seconds": 59.28,
+        "ours_render_user_seconds": 91.87,
+        "reading": "our walk is 16 % faster and the two cores cost the same for SAN (see below). The user-time gap is I/O accounting: the ancestor preads every record - its largest profile entry - and books it as system time, while our mapped, streamed path books it as user time. user+system: 134.4 s against 138.2 s"
+      },
+      "san_body_measurement": {
+        "method": "examples/san_probe.rs over 200,000 records (13,908,447 moves): one pass rendering nothing, one with `gigachess::san::move_to_san_body`, one with the per-candidate disambiguation",
+        "gigachess_san_body_ns_per_move": 14.5,
+        "per_candidate_san_body_ns_per_move": 6.6,
+        "moves_taking_the_ambiguous_branch": 558028,
+        "moves_total": 13908447,
+        "ambiguous_branch_rate": "4.0 % - gigachess pays a full legal movegen there, and the rest of the time the cheap pre-filter answers it",
+        "saving_on_a_whole_database_export_seconds": 7.0
+      },
+      "the_candidate_test_changes_the_output": {
+        "moves_where_the_two_disagree": 473226,
+        "gold_exact_with_gigachess": 407350,
+        "gold_exact_with_the_per_candidate_test": 83337,
+        "new_diffs_over_disambiguation_only": 335990,
+        "reading": "ChessBase's own hints are the ones a full legal-move query produces, so the movegen is the semantics and the per-candidate approximation is not a drop-in. Rejected on correctness, not on taste; the writer keeps `move_to_san_body` and the finding is recorded at the call site and in docs/format-spec.md §11.7"
+      },
+      "mate_test": {
+        "moves_leaving_the_side_to_move_in_check": 732592,
+        "rate": "5.3 %",
+        "gigachess_count_legal_moves_vs_has_legal_move": "identical suffix on all 732,592, and no measurable cost difference (0.80 s against 0.82 s over the same slice)",
+        "reading": "nothing to gain: the early-exit shape answers the same question at the same price"
+      }
     }
   }
 }

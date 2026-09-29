@@ -523,6 +523,36 @@ on the knee, and neither change makes the export measurably faster.** The
 numbers are in `benchmarks/baseline.json` under `buffer_sweep` and
 `second_round_inline_san_and_write_path`:
 
+**Why the user-time column reads the way it does.** The two implementations
+book their I/O differently: the ancestor `pread`s every record (its largest
+profile entry, and the 29.3 s of system time below), so its reading and its
+memory traffic are in the *system* column, while ours — memory-mapped, streamed
+1 MiB at a time — pays for the same work in *user* time. On user + system we
+are 134.4 s against 138.2 s. Stage by stage, on the same records:
+
+| stage (whole database, 1 thread) | ancestor | ours |
+|---|---|---|
+| walk / decode only (`verify`, `--decode-only`) | 49.6 s | **41.7 s** |
+| SAN body, per move | ~10.7 s (profile share) | 11.2 s (measured: 14.5 ns/ply) |
+| mate test, the 5.3 % of moves that give check | identical, no cost difference | identical |
+| everything else (tags, movetext, annotations, output) | ~48 s | ~76 s |
+
+So the chess cores cost the same on this workload and our walk is 16 % faster;
+the CPU-only gap is the I/O accounting, not the chess. The one real
+algorithmic difference is the SAN *disambiguation*: `gigachess` 0.1.5 answers it
+with a **full legal movegen of the position** whenever a second piece of the
+same type attacks the destination — 4.0 % of moves (558,028 of 13,908,447 over
+200,000 records) — while the ancestor tests each candidate on its own
+(`cbformat::pgn::san::disambiguate`, MIT, chesscore: same file → rank → square
+rule over the legally reachable candidates). It is cheaper: measured 6.6 ns per
+SAN body against 14.5 ns, worth ~7 s of a whole-database export. **It is also
+wrong for our output, and that is not a tuning matter:** the two disagree on
+473,226 of 13,908,447 moves, and against ChessBase's own gold export the
+per-candidate form matches 83,337 games against `gigachess`' 407,350, dropping
+the hint in 335,990 games. ChessBase's hints are those of a full legal-move
+query, so the movegen *is* the semantics here; `examples/san_probe.rs`
+reproduces both measurements.
+
 The like-for-like run — same database, same machine, one after the other, both
 writing the annotations, output to `/dev/null` — is the table below. It also
 corrects the comparison above: the tool's own PGN path used to drop every
