@@ -85,6 +85,48 @@ The library SHALL decode `.cba` annotation records into per-move comments: text 
 - **WHEN** an annotation contains sound/video/picture records
 - **THEN** decoding succeeds and exposes the record kinds without failing the game.
 
+### Requirement: PGN output SHALL use the standard notation, not ChessBase's export quirks
+
+The writer SHALL spell a move the way the PGN/SAN standard does wherever
+ChessBase's own export departs from it, while reading the stored form exactly as
+ChessBase wrote it:
+
+- SAN disambiguation SHALL be **minimal** — a file qualifier only when no other
+  legal candidate of the same type shares that file, otherwise a rank, otherwise
+  both — and SHALL NOT copy ChessBase's unconditional hint for a same-type twin;
+- a null move SHALL be written `--`, never ChessBase's `Z0`;
+- a backslash inside a tag value SHALL be doubled, and a `FEN` tag SHALL be the
+  start position the moves were played from;
+- stored text SHALL be decoded by its code page rather than turned into U+FFFD.
+
+The rationale is that each of these is ChessBase's own export convention rather
+than the standard: `Z0` is not PGN (the standard reserves `--` for a move that
+changes nothing), and a disambiguation hint is by definition redundant, so
+writing the minimal form loses no information and stays parseable. Reading stays
+liberal — both null-move spellings and both hinted and unhinted SAN are accepted
+on input — so the difference is one of style, not meaning. `docs/format-spec.md`
+§10 carries the full table with the per-item evidence and cost.
+
+#### Scenario: A twin piece does not earn a hint
+
+- **WHEN** two pieces of the same type can legally reach one square and the
+  move is already identified
+- **THEN** the SAN carries no file or rank qualifier
+- **AND** the gold comparison counts that game in its deliberate
+  over-disambiguation class rather than as a regression (11,977 of 419,385).
+
+#### Scenario: A null move is written as the standard spelling
+
+- **WHEN** a record's move is the null-move word
+- **THEN** the movetext contains `--` and not `Z0`
+- **AND** the gold comparison maps `Z0` to `--` before comparing, so the
+  deviation costs no differences.
+
+#### Scenario: A tag value stays valid PGN
+
+- **WHEN** a player's name contains a backslash
+- **THEN** the tag writes it doubled, which is what the standard requires.
+
 ### Requirement: PGN export streams without intermediate text
 
 The library SHALL export a database or a selected game range to PGN as a streaming writer, generating SAN through `gigachess` only at the output boundary.

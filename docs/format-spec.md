@@ -14,7 +14,9 @@
 > sources. See `docs/provenance.md`.
 >
 > **Status legend** — **✓ implemented** (code + tests), **◐ partial**,
-> **✗ pending** (observed and specified, not yet applied by our writer).
+> **✗ pending** (observed and specified, not yet applied by our writer),
+> **○ specified, not implemented** (no reader or writer for it yet — the
+> `.cbv`/`.cbz` containers and the 2CBH family).
 
 ---
 
@@ -43,8 +45,8 @@
 | `.cbe` | entity strings (players, tournaments, …) | ✓ |
 | `.cbj` | "wide" auxiliary index (`wide.rs`) | ✓ |
 | `.cbtt` | text table (`texttable.rs`) | ✓ |
-| `.cbv`, `.cbz` | archive containers | ✓ (extract only) |
-| `.cbb`, `.cbc`, `.cbl`, `.cbm`, `.cbp`, `.cbs`, `.cbt`, `.cbgi` | present in the wild; roles in `SPEC.md`, not all read yet | ◐ |
+| `.cbv`, `.cbz` | archive containers | ○ (specified, not implemented) |
+| `.cbb`, `.cbc`, `.cbl`, `.cbm`, `.cbp`, `.cbs`, `.cbt`, `.cbgi` | present in the wild; roles recorded, not all read yet | ◐ |
 
 File header minimum accepted by the readers: **10 bytes**
 (`cbh::batch::MIN_FILE_HEADER`). Mega Database 2025's `.cbh` has a **46-byte**
@@ -135,8 +137,9 @@ games 96/113). **✓ implemented**
 ## 5. `.cbg` moves
 
 16-bit `moves2` = `from | to<<6 | promo<<12`; castling is king→rook
-(`e1h1`, `e1a1`, Chess960 included); null move is ChessBase's `Z0` spelling
-(`NULL_MOVE`), exported as `--`. Stored order is depth-first, main line first
+(`e1h1`, `e1a1`, Chess960 included); the null move is the `NULL_MOVE` word,
+which ChessBase exports as `Z0` and we export as `--` — see **§10 #2** for why,
+and **§10 #1** for the SAN disambiguation we do not copy. Stored order is depth-first, main line first
 at every position. All move semantics live in `gigachess`/`cbh-chess`
 (no second chess implementation). **✓ implemented**
 
@@ -211,8 +214,10 @@ after main-line ply *k*, first = start position; header is `0,<count−1>`.
 
 ## 8. Reading form (PGN) — placement rules
 
-The reading form **is the form ChessBase's own export takes**; the gold
-comparison holds us to it.
+The reading form is the form ChessBase's own export takes; the gold comparison
+holds us to it, with the five places where we deliberately differ listed with
+their rationale in **§10** (SAN disambiguation, the null-move spelling, tag
+backslash escaping, the `FEN` tag, and encoding damage).
 
 ### 8.1 Placement
 - The game's `-1` annotations form **one comment before the first move**:
@@ -375,17 +380,35 @@ U+E024→`K`, U+E025→`Q`, U+E026→`R`, U+E027→`B`, U+E028→`N`, U+E029→`
 
 ## 10. Known ChessBase quirks (we deliberately do **not** copy)
 
-| Quirk | Evidence | Our behaviour |
-|-------|----------|---------------|
-| Null move exported as `Z0` | `SPEC.md` | we write `--` |
-| Over-disambiguation (`Nce7` where `Ne7` suffices) | 11,540 gold games differ only in this | we write minimal SAN |
-| Tag values with a raw single backslash (`Morphy\Barnes`) | 5 gold games | we escape `\\` (valid PGN) |
-| `FEN` tag differences | 17 gold games | our FEN from the header |
-| Export encoding damage (invalid bytes → U+FFFD) | in the gold file itself | we decode per §3 |
+These are places where ChessBase's own PGN export departs from the PGN
+standard, from valid text, or from the bytes it stores. We deviate on purpose,
+each one a writer-side decision about the *reading form* we emit; the stored
+form is read exactly as ChessBase wrote it. `gold_pgn` classifies the result,
+so none of these is an annotation regression, and the gold comparison maps
+ChessBase's `Z0` onto `--` before comparing, so the null-move spelling is
+invisible in the counts.
 
-These are classified by `gold_pgn` and are **not** annotation regressions.
+| # | Quirk | What ChessBase writes | What we write | Why we deviate | Evidence / cost |
+|---|-------|----------------------|----------------|----------------|-----------------|
+| 1 | **Over-disambiguation** | a file or rank hint where none is needed: `Nce7` for a move already identified, Chess960-style placement on every twin | the **minimal** qualifier, per the PGN/SAN rule: file when no other candidate shares it, else rank, else both | the SAN standard's disambiguation is *minimal by definition* — a hint is only there to identify the move. ChessBase writes hints its own generator finds convenient, so copying them would mean reproducing a deviation from the standard rather than following it. The hint is redundant information, so our output is still unambiguous and re-parses to the same move. | **11,977 of 419,385 gold games (2.9 %) differ in this class and in nothing else** — the whole deliberate bucket. Verified equivalent: gigachess renders the minimal form from a legal-move query and from a direct per-candidate test with **0 differing moves over 13,908,447** (`openspec/adr/003`, `benchmarks/baseline.json`). |
+| 2 | **Null move spelling** | `Z0` | `--` | `Z0` is ChessBase's own export spelling, not PGN: the standard reserves `--` for a move that changes nothing, and parsers (PGNExport, scid, Lichess) accept `--` and reject `Z0`. A null move *is* representable in PGN, so writing `Z0` would make our output non-standard to buy nothing. | the gold harness normalises `Z0` → `--` before comparing (§11.6), so it costs **0 diffs**; the stored `NULL_MOVE` word is read and written unchanged otherwise (§5). Our SAN *reader* (`gigachess::san::san_to_move`) parses neither spelling today, so this is a writer-side rule only — recorded here so the asymmetry is not mistaken for an oversight. |
+| 3 | **Raw backslash in a tag** | `Morphy\Barnes` — one unescaped backslash, which PGN requires doubled | `Morphy\\Barnes` | an unescaped `\` is not a legal PGN string; writing one produces a tag that strict parsers reject or mis-parse. | 5 gold games. |
+| 4 | **`FEN` tag** | the position as its own exporter re-serialised it | the FEN built from the header's start section by the same path the moves start from | one FEN per game from one source of truth; ChessBase's own `FEN` disagrees with its movetext start in 17 gold games. | 17 gold games. |
+| 5 | **Encoding damage** | invalid stored bytes become U+FFFD in the export | the bytes decoded per §3 (Windows-1252 / Latin-1 / UTF-8) | U+FFFD is lossy: the original code point is gone. Decoding per the code page recovers it, which is why §11.1 counts ~20 games where *we* are the more correct. | the gold file itself carries the damage; §11.1. |
 
----
+Two things follow from this table, and both are load-bearing:
+
+- **Reading stays liberal, writing stays strict.** We accept what ChessBase
+  wrote (both null-move spellings on input where a SAN reader is used at all,
+  both hinted and unhinted SAN), and we emit the standard form. That is why the
+  11,977-game class costs us nothing in correctness: it is a difference of
+  *style*, not of meaning.
+- **It applies to every format we write.** The deviations are in the PGN
+  writing path (`pgn::PgnWriter`), which is shared by every database the
+  writer serves — the classic `.cbh` family measured here, and the 2CBH family
+  when its reader lands (§1, and the status table in `README.md`). They are
+  notation-layer decisions; nothing in the stored `.cbh`/`.2cbh` layout is
+  affected.
 
 ## 11. Open observation queue (full gold run, 2026-09-27, final)
 
