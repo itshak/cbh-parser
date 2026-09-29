@@ -2,7 +2,7 @@
 
 Our own statement of the ChessBase on-disk facts this project implements, in our words,
 with one source note per fact and every unknown listed. It is the fact sheet behind
-`openspec/specs/cbh-database/spec.md`; it is not a copy of any upstream text.
+`openspec/specs/cbvault/spec.md`; it is not a copy of any upstream text.
 
 ## Source legend
 
@@ -107,7 +107,7 @@ their header magic; both are read through the same model.
 - Text in the classic files is ISO 8859-1 in the ancestor's reader; `.pgn`-style text of
   older programs uses the Windows code page of the machine (implementation supports
   1252 by default) `[FN]` `[SRC]`.
-- Our port keeps the ancestor's tables and detection, re-expressed in `cbh-format`
+- Our port keeps the ancestor's tables and detection, re-expressed in `cbvault-format`
   `[SRC]`.
 
 ### 2.6 Derived files

@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-09-29
-- **Deciders:** cbvault (cbh-parser) maintainers
+- **Deciders:** cbvault (cbvault) maintainers
 - **Applies to:** every performance change in this repository
 - **Context:** `pgn-export-sota-performance`, and a development machine that was
   never idle when the numbers were taken.

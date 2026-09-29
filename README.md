@@ -1,6 +1,6 @@
 # cbvault
 
-A fast, MIT-licensed Rust library and CLI for reading ChessBase databases (formerly `cbh-parser`; renamed because the library covers the classic **`.cbh` family**, the **2CBH family** and **`.cbv`/`.cbz` archives**, not just `.cbh` parsing): the classic **`.cbh` family** (`.cbh .cbg .cba .cbp .cbt .cbc .cbs .cbj .cbe .cbl .cbm .cbtt`, metadata `.flags`, boosters `.cit/.cib/.cit2/.cib2/.cbb/.cbgi`) and the **2CBH family** (`.2cbh .2cbg .2cba .2lid .2lgd .2lcd`), as well as **`.cbv` / `.cbz` archive containers** — with `gigachess` as the one and only chess core. Derived accelerator files (`.cko`, `.cpo`) and the `.patterns/` / `.accelerators/` folders are recognized and ignored in v1; CBONE and CBCloud are out of scope.
+A fast, MIT-licensed Rust library and CLI for reading ChessBase databases — the classic **`.cbh` family** (`.cbh .cbg .cba .cbp .cbt .cbc .cbs .cbj .cbe .cbl .cbm .cbtt`, metadata `.flags`, boosters `.cit/.cib/.cit2/.cib2/.cbb/.cbgi`) and the **2CBH family** (`.2cbh .2cbg .2cba .2lid .2lgd .2lcd`), as well as **`.cbv` / `.cbz` archive containers** — with `gigachess` as the one and only chess core. Derived accelerator files (`.cko`, `.cpo`) and the `.patterns/` / `.accelerators/` folders are recognized and ignored in v1; CBONE and CBCloud are out of scope.
 
 > **Status (2026-09-29): the classic `.cbh` family is read, decoded, annotated and
 > exported; the containers and the 2CBH family are not read yet.** The first
@@ -16,13 +16,20 @@ A fast, MIT-licensed Rust library and CLI for reading ChessBase databases (forme
 > | `.flags` metadata, `.cbp`/`.cbt`/`.cbc`/`.cbs` | **✓ / ○** | metadata read; the counters are recognised and validated, not interpreted |
 > | PGN export (tags, movetext, annotations) | **✓** | sequential and Rayon-parallel, byte-identical output |
 > | Gold parity vs ChessBase's own export | **✓** | **407,350 of 419,385 games exact (97.1 %)**, 0 read errors; §10 of `docs/format-spec.md` lists the five deliberate deviations |
-> | Public façade `Database::open` / `decode_game_into` | **○** | not yet; the crates are used directly (`cbh_format::cbh::*` + `cbh_chess`), which is what the CLI and the gold harness do |
+> | Public façade `Database::open` / `decode_game_into` | **○** | not yet; the crates are used directly (`cbvault_format::cbh::*` + `cbvault_chess`), which is what the CLI and the gold harness do |
 > | CLI `info`, `verify` | **✓** | |
 > | CLI `pgn`, `games`, `archive` | **○** | the PGN path exists as an example (`megabase`) and as `pgn::export_parallel`, not as a CLI command |
-> | `.cbv` / `.cbz` archives | **○** | specified (`cbh-database` → *`.cbv` and `.cbz` archives are readable*); typed errors exist, no reader |
+> | `.cbv` / `.cbz` archives | **○** | specified (`cbvault` → *`.cbv` and `.cbz` archives are readable*); typed errors exist, no reader |
 > | 2CBH family (`.2cbh .2bg .2ba .2lid .2lgd .2lcd`) | **○** | specified; no reader |
 >
 > **✓** implemented and tested · **○** specified, not implemented
+
+```bash
+git clone git@github.com:itshak/cbvault.git
+cd cbvault
+cargo build --release          # the library and the `cbvault` CLI
+cargo test --workspace         # 26 suites; the real-database tests skip without CBVAULT_TEST_DB
+```
 
 ## Why
 

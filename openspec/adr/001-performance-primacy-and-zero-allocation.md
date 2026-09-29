@@ -2,8 +2,8 @@
 
 - **Status:** Accepted
 - **Date:** 2026-09-29
-- **Deciders:** cbvault (cbh-parser) maintainers
-- **Applies to:** `crates/cbh-format`, `crates/cbh-chess`, `crates/cbh-parser`
+- **Deciders:** cbvault (cbvault) maintainers
+- **Applies to:** `crates/cbvault-format`, `crates/cbvault-chess`, `crates/cbvault`
 - **Context:** `pgn-export-sota-performance` — making the PGN exporter the
   fastest of the three implementations without giving up a single byte of
   ChessBase gold parity.
@@ -12,7 +12,7 @@
 
 ## Context
 
-`cbh-parser` exists to be the fast reader for ChessBase databases: users bring
+`cbvault` exists to be the fast reader for ChessBase databases: users bring
 their own databases and nothing is redistributed, so throughput is the product.
 The PGN export is the stage that reads the most bytes and writes the most
 text — 7.7 GB of PGN for the 11.1 M-record reference database — and it was
@@ -49,7 +49,7 @@ allocations per name, and there are five names per game. The mapped file is
 borrowed (`EntityFile::data_ref`) and decoded into a caller-owned `NameBuf`.
 
 **5. The board is built once, not once per game.** `gigachess` parses a FEN in
-`Board::startpos()`. A `OnceLock` (`cbh_chess::start::standard_board`) plus a
+`Board::startpos()`. A `OnceLock` (`cbvault_chess::start::standard_board`) plus a
 per-start `StartCache` removed two FEN parses per game — one in the writer, one
 inside the walk.
 

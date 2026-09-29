@@ -17,7 +17,7 @@
     "note": "CBTOOL_THREADS=1; upstream defaults to one thread per CPU"
   },
   "database": {
-    "env": "CBH_TEST_DB",
+    "env": "CBVAULT_TEST_DB",
     "base": "Mega Database 2025/Mega Database 2025",
     "generation": "classic (.cbh family)",
     "records": 11151119,
@@ -120,7 +120,7 @@
   "megabase_rerun": {
     "recorded": "2026-09-28",
     "machine": "same MacBookPro18,2 (Apple M1 Max) as the 0.4 baseline",
-    "tool": "local-only example crates/cbh-parser/examples/megabase.rs (move-decode parity + main-line SAN sample; .cba checks are phase 4, not ported yet)",
+    "tool": "local-only example crates/cbvault/examples/megabase.rs (move-decode parity + main-line SAN sample; .cba checks are phase 4, not ported yet)",
     "note": "Same-database, same-machine comparison after the Chess960/standard castling-rights fix (rook_file mirrors upstream setup_board; generated Chess960 starts use their own king/rook files). Full PGN export was not re-run: /tmp filled during the earlier attempt (2.6 GiB partial ours.pgn, 5.3 GiB partial upstream.pgn); SAN parity below covers exact-output on the sampled games instead.",
     "upstream_verify": {
       "command": "CBTOOL_THREADS=1 cbtool verify",
@@ -329,7 +329,7 @@
       "core_fmt": "~3.5% (write!(\"{}. \", fullmove) is executed 869M times; format! per tag and player)",
       "platform_memmove": "7% (SAN -> sans -> movetext -> BufWriter)",
       "malloc_free": "~2.5% (Vec per entity lookup, String per name, format! per token)",
-      "cbh_format_text": "~1% (entity-name decoding on the tag path)"
+      "cbvault_format_text": "~1% (entity-name decoding on the tag path)"
     },
     "criterion_bench_export_100k": {
       "recorded": "2026-09-28",

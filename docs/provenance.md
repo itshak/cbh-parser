@@ -8,7 +8,7 @@ is normative: a change that adds or moves a module MUST add or move its row here
 
 | Regime | Sources | Allowed | Mechanics |
 |---|---|---|---|
-| **Port (MIT)** | `cbformat` in `oschess-cb-bridge` | copy + modify | Keep the upstream MIT notice; add a per-file "modified by cbh-parser" note; ledger row here; listed in `THIRD_PARTY_NOTICES.md` |
+| **Port (MIT)** | `cbformat` in `oschess-cb-bridge` | copy + modify | Keep the upstream MIT notice; add a per-file "modified by cbvault" note; ledger row here; listed in `THIRD_PARTY_NOTICES.md` |
 | **Facts-only** | Morphy's `format/v1`/`format/v2`/modern specs, ChessBase help pages, public reverse-engineering threads, the ancestor's own `docs/format-notes.md` (MIT, for its *facts*) | Re-express facts in our own words and code | Cite the source per fact in `SPEC.md`; never copy text or code; raw format data (e.g. byte permutations) carries its source in the source file |
 | **Oracle-only** | `scidb`/`cbh2si4`, `libcbh`, `uncbv`, `Source2Metal` (GPL), `asdfjkl/cbh2pgn` (MIT), `morphy` (unlicensed), ChessBase's own PGN exports | Run as separate processes in tests | Scripts under `scripts/oracles/`; env-gated (`CBH_ORACLE=1`); never linked, never vendored into the build; no code copied — the single exception is the 256-byte table data from the MIT `asdfjkl` project, attributed in `THIRD_PARTY_NOTICES.md` |
 | **Original** | This project | — | Ledger row; no external source to cite |
@@ -20,7 +20,7 @@ classification in `docs/port-inventory.md`.
 
 ## `.cbv` / `.cbz` clean-room protocol
 
-The container readers (`cbh-format` archive reader, `.cbz` decryption, the
+The container readers (`cbvault-format` archive reader, `.cbz` decryption, the
 `Archive` façade) are **original** code written under this protocol:
 
 1. **Facts first.** Before any implementation, `docs/research/00-cbv-facts.md`
@@ -61,21 +61,21 @@ State: `planned` until the porting task lands; then `ported`/`ported (chess swap
 
 | Ours | Upstream | Regime | State |
 |---|---|---|---|
-| `cbh-format` — `file`, `codepage` | `file.rs`, `codepage.rs` | port | **ported** (2.1, 2.4); `file` extended with original zero-copy `mmap` reads (`memmap2`, default-on feature) in `maximum-single-thread-decode` |
-| `cbh-format` — `tables` (move-mode byte tables) | `cbh/tables.rs` | port (raw format data; MIT `asdfjkl/cbh2pgn` credit kept) | **ported** (0.6) |
-| `cbh-format` — `cbh::{bytes, record, entities, wide}` | `cbh/{bytes,record,entities,wide}.rs` | port | **ported** (2.1–2.3); `record` extended with original zero-copy `GameHeaderRef` in `maximum-single-thread-decode` |
-| `cbh-format` — `cbh::batch` | `cbh/mod.rs` (batching concepts) | port | **ported** (`fast-decode-and-parallel-replay`); extended with original zero-copy header borrowing and mmap span reads in `maximum-single-thread-decode` |
-| `cbh-format` — `cbh::{annotations, text, window}` | `cbh/{annotations,text,window}.rs` | port | planned (3.4–3.5, 4.1) |
-| `cbh-format` — `cbh::moves` (record split, start decode) | `cbh/moves.rs` | port + chess swap (start board via `gigachess`) | planned (3.1, 3.3) |
-| `cbh-format` — `v2::{bytes, record, frame, entities, moves, window, annotations}` | `v2/**` | port | planned (2CBH follow-up change) |
-| `cbh-format` — `game::{head, fields, entities}` | `game/{head,fields,entities}.rs` | port | **ported** (2.1–2.3) |
-| `cbh-format` — `game::{start, annotations}` | `game/{start,annotations}.rs` | port | planned (3.3, 4.1–4.2) |
-| `cbh-chess` — `movetable` | `movetable/**` | port (raw format data — credited to MIT `asdfjkl/cbh2pgn`; ancestor states it follows the published format description) | planned (3.2) |
-| `cbh-chess` — `decode`, `pieces`, `tree`, `start` | `cbh/{decode,pieces}.rs`, `replay/**`, `game/start.rs` | port + chess swap (`moves2`, `gigachess` legality incl. null moves via `make_null_move`, king→rook castling, Polyglot keys) | **ported** (3.1–3.4) |
-| `cbh-parser` — `view` | `view.rs` | port | planned (6.1) |
-| `cbh-parser` — `pgn::{san, tree, commands, comments, classic, mod}` | `pgn/**` | port + chess swap (streaming writer, SAN via `gigachess` at the boundary; null moves as `--`) | **ported** (3.5) |
-| `cbh-fixtures` — classic writer | `fixture_cbh.rs`, `fixture_cbh/builder.rs` | port + chess swap | **ported (0.6)**; 2CBH writer (`fixture.rs`) pending the 2CBH change |
-| `cbh-fixtures` — 2CBH writer | `fixture.rs` | port + chess swap | planned (2CBH follow-up) |
+| `cbvault-format` — `file`, `codepage` | `file.rs`, `codepage.rs` | port | **ported** (2.1, 2.4); `file` extended with original zero-copy `mmap` reads (`memmap2`, default-on feature) in `maximum-single-thread-decode` |
+| `cbvault-format` — `tables` (move-mode byte tables) | `cbh/tables.rs` | port (raw format data; MIT `asdfjkl/cbh2pgn` credit kept) | **ported** (0.6) |
+| `cbvault-format` — `cbh::{bytes, record, entities, wide}` | `cbh/{bytes,record,entities,wide}.rs` | port | **ported** (2.1–2.3); `record` extended with original zero-copy `GameHeaderRef` in `maximum-single-thread-decode` |
+| `cbvault-format` — `cbh::batch` | `cbh/mod.rs` (batching concepts) | port | **ported** (`fast-decode-and-parallel-replay`); extended with original zero-copy header borrowing and mmap span reads in `maximum-single-thread-decode` |
+| `cbvault-format` — `cbh::{annotations, text, window}` | `cbh/{annotations,text,window}.rs` | port | planned (3.4–3.5, 4.1) |
+| `cbvault-format` — `cbh::moves` (record split, start decode) | `cbh/moves.rs` | port + chess swap (start board via `gigachess`) | planned (3.1, 3.3) |
+| `cbvault-format` — `v2::{bytes, record, frame, entities, moves, window, annotations}` | `v2/**` | port | planned (2CBH follow-up change) |
+| `cbvault-format` — `game::{head, fields, entities}` | `game/{head,fields,entities}.rs` | port | **ported** (2.1–2.3) |
+| `cbvault-format` — `game::{start, annotations}` | `game/{start,annotations}.rs` | port | planned (3.3, 4.1–4.2) |
+| `cbvault-chess` — `movetable` | `movetable/**` | port (raw format data — credited to MIT `asdfjkl/cbh2pgn`; ancestor states it follows the published format description) | planned (3.2) |
+| `cbvault-chess` — `decode`, `pieces`, `tree`, `start` | `cbh/{decode,pieces}.rs`, `replay/**`, `game/start.rs` | port + chess swap (`moves2`, `gigachess` legality incl. null moves via `make_null_move`, king→rook castling, Polyglot keys) | **ported** (3.1–3.4) |
+| `cbvault` — `view` | `view.rs` | port | planned (6.1) |
+| `cbvault` — `pgn::{san, tree, commands, comments, classic, mod}` | `pgn/**` | port + chess swap (streaming writer, SAN via `gigachess` at the boundary; null moves as `--`) | **ported** (3.5) |
+| `cbvault-fixtures` — classic writer | `fixture_cbh.rs`, `fixture_cbh/builder.rs` | port + chess swap | **ported (0.6)**; 2CBH writer (`fixture.rs`) pending the 2CBH change |
+| `cbvault-fixtures` — 2CBH writer | `fixture.rs` | port + chess swap | planned (2CBH follow-up) |
 
 ### Facts-only records
 
@@ -102,20 +102,20 @@ State: `planned` until the porting task lands; then `ported`/`ported (chess swap
 | Ours | Notes |
 |---|---|
 | Workspace layout, `rustfmt.toml`, shared lints (`Cargo.toml`) | Original; conventions adapted from the ancestor (max width 120, small heuristics Max); nothing copied |
-| `cbh-format::error` — typed `Error`/`Result`/`Role` | Original (task 1.2); no panics on damaged input |
-| `cbh-format::cbh::flags` (`.flags`) | Original (task 2.2): layout and the Top Games bits established from the local Mega Database 2025 (facts in `SPEC.md` §2.4 and the real-database report); the ancestor lists `.flags` but reads it nowhere |
-| `cbh-format::cbh::textblocks` (`.cbl`) and `cbh::texttable` (`.cbtt`) | Original (task 2.3): record framing from our inspection of the local Mega 2025; the ancestor reads neither; `.cbtt`'s record content stays unverified (`SPEC.md` unknowns) |
-| `cbh-format::cbh::entities` reading of `.cbe` (teams) | The file uses the ancestor's entity-file framing; reading it as the teams namebase is ours (task 2.3) |
-| `cbh-format` — archive reader (`.cbv`, `.cbz`) | Clean-room per the protocol above; facts in `docs/research/00-cbv-facts.md` |
-| `cbh-parser` — `Database`, `GameIter`, `decode_game_into`, archive façade | Task 6.1, 5.3 |
-| `cbh-parser::replay` — `verify_parallel`, Rayon chunk worker | Original (`fast-decode-and-parallel-replay`) |
-| `cbh-parser::pgn::parallel` — `export_parallel` / `export_range`, Rayon export pipeline | Original (`pgn-export-sota-performance`): modelled on our own `replay::verify_parallel`, byte-identical to the sequential writer by construction (id-ordered chunks, one `write_all` per chunk) |
-| `cbh-format::cbh::bytes::NameBuf`, `Entities::player_into` / `tournament_into`, `EntityFile::data_ref` | Original: the mmap-borrowed entity record and the reusable name buffer; the decode rules are `text()`'s, unchanged |
-| `cbh-chess::start::StartCache`, `standard_board`, `start_board_cached` | Original: gigachess parses a FEN in `Board::startpos()`, so the standard board is built once per process and set-up/Chess960 boards are cached per start |
+| `cbvault-format::error` — typed `Error`/`Result`/`Role` | Original (task 1.2); no panics on damaged input |
+| `cbvault-format::cbh::flags` (`.flags`) | Original (task 2.2): layout and the Top Games bits established from the local Mega Database 2025 (facts in `SPEC.md` §2.4 and the real-database report); the ancestor lists `.flags` but reads it nowhere |
+| `cbvault-format::cbh::textblocks` (`.cbl`) and `cbh::texttable` (`.cbtt`) | Original (task 2.3): record framing from our inspection of the local Mega 2025; the ancestor reads neither; `.cbtt`'s record content stays unverified (`SPEC.md` unknowns) |
+| `cbvault-format::cbh::entities` reading of `.cbe` (teams) | The file uses the ancestor's entity-file framing; reading it as the teams namebase is ours (task 2.3) |
+| `cbvault-format` — archive reader (`.cbv`, `.cbz`) | Clean-room per the protocol above; facts in `docs/research/00-cbv-facts.md` |
+| `cbvault` — `Database`, `GameIter`, `decode_game_into`, archive façade | Task 6.1, 5.3 |
+| `cbvault::replay` — `verify_parallel`, Rayon chunk worker | Original (`fast-decode-and-parallel-replay`) |
+| `cbvault::pgn::parallel` — `export_parallel` / `export_range`, Rayon export pipeline | Original (`pgn-export-sota-performance`): modelled on our own `replay::verify_parallel`, byte-identical to the sequential writer by construction (id-ordered chunks, one `write_all` per chunk) |
+| `cbvault-format::cbh::bytes::NameBuf`, `Entities::player_into` / `tournament_into`, `EntityFile::data_ref` | Original: the mmap-borrowed entity record and the reusable name buffer; the decode rules are `text()`'s, unchanged |
+| `cbvault-chess::start::StartCache`, `standard_board`, `start_board_cached` | Original: gigachess parses a FEN in `Board::startpos()`, so the standard board is built once per process and set-up/Chess960 boards are cached per start |
 | `MoveSink::wants_checkers` | Original: the contract that a sink reading the cached `checkers` (as `check_mate_suffix` does) gets a `Board::play` walk rather than the stale-cache `play_fast` |
-| SAN rendering in the writer (`move_to_san_body` + `check_mate_suffix`) | gigachess 0.1.6 (MIT, `itshak/gigachess-rs`); the *split* is upstream's, the ancestor's `write_san_body` / `write_check_suffix` shape was read as a design oracle only — no ancestor code copied. The 0.1.6 disambiguation (ask each candidate directly instead of a full legal movegen) was written here from the pre-filter's exactness, after the `cbh-parser` study showed the ancestor's cheaper test produces the same qualifiers: gigachess change `turbochess-rs-san-disambiguation-direct`, verified by `tests/san_disambiguation_property.rs` (a movegen oracle over 200,000 moves) and, here, by the gold comparison (407,350 of 419,385 games, unchanged) |
-| `cbh-cli` — `info`, `verify`, `pgn`, `games`, `archive` | Task 5.3, 6.4 |
-| `cbh-chess` — gigachess bridge helpers (start boards, key alignment) | Task 3.3 |
+| SAN rendering in the writer (`move_to_san_body` + `check_mate_suffix`) | gigachess 0.1.6 (MIT, `itshak/gigachess-rs`); the *split* is upstream's, the ancestor's `write_san_body` / `write_check_suffix` shape was read as a design oracle only — no ancestor code copied. The 0.1.6 disambiguation (ask each candidate directly instead of a full legal movegen) was written here from the pre-filter's exactness, after the `cbvault` study showed the ancestor's cheaper test produces the same qualifiers: gigachess change `turbochess-rs-san-disambiguation-direct`, verified by `tests/san_disambiguation_property.rs` (a movegen oracle over 200,000 moves) and, here, by the gold comparison (407,350 of 419,385 games, unchanged) |
+| `cbvault-cli` — `info`, `verify`, `pgn`, `games`, `archive` | Task 5.3, 6.4 |
+| `cbvault-chess` — gigachess bridge helpers (start boards, key alignment) | Task 3.3 |
 | `scripts/oracles/**`, `scripts/fetch-ancestor.sh`, benchmark harness | Tasks 0.4, 0.7, 6.2 |
 | CI workflow, including the one-chess-core guard | Task 1.3 |
 | `docs/**`, `SPEC.md`, fixtures builder glue | Tasks 0.5, 0.6 |

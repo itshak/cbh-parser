@@ -29,52 +29,52 @@
 | Path | Lines | Class | Target crate | Notes |
 |---|---|---|---|---|
 | `lib.rs` | 75 | port as-is | all | Crate root, `Error`/`Result`; re-shaped into per-crate errors (task 1.2) |
-| `file.rs` | 194 | port as-is | `cbh-format` | Positional file reads (never maps); case-insensitive sibling resolution lives here |
-| `codepage.rs` | 193 | port as-is | `cbh-format` | Windows single-byte code pages; encoding detection |
-| `cbh/mod.rs` | 379 | port as-is | `cbh-format` | Classic `.cbh` reader orchestration (record → moves → entities) |
-| `cbh/bytes.rs` | 79 | port as-is | `cbh-format` | Bounded big-endian integer reads |
-| `cbh/tables.rs` | 74 | port as-is | `cbh-format` | The 256-byte move-mode translation tables (format data; see provenance) |
-| `cbh/record.rs` | 212 | port as-is | `cbh-format` | The 46-byte header record of games and guiding texts |
-| `cbh/entities.rs` | 138 | port as-is | `cbh-format` | `.cbp` `.cbt` `.cbc` `.cbs` namebases by id |
-| `cbh/annotations.rs` | 154 | port as-is | `cbh-format` | Classic `.cba` annotation records |
-| `cbh/text.rs` | 70 | port as-is | `cbh-format` | Guiding-text titles (one per language) |
-| `cbh/wide.rs` | 61 | port as-is | `cbh-format` | 64-bit `.cbj` offsets for `.cbg`/`.cba` over 4 GiB |
-| `cbh/window.rs` | 100 | port as-is | `cbh-format` | Caller-owned move-record buffer (zero-allocation scan) |
-| `cbh/moves.rs` | 217 | **chess swap** | `cbh-format` + `cbh-chess` | `.cbg` record split; start position decode; Chess960 index identification |
-| `cbh/decode.rs` | 399 | **chess swap** | `cbh-chess` | Compact-encoding move decode against a board, tree walk with push/pop |
-| `cbh/pieces.rs` | 151 | **chess swap** | `cbh-chess` | Piece lists of the compact encoding (piece numbering on captures) |
-| `v2/mod.rs` | 401 | port as-is | `cbh-format` | 2CBH `.2cbh` reader orchestration |
-| `v2/bytes.rs` | 26 | port as-is | `cbh-format` | Bounded little-endian reads |
-| `v2/record.rs` | 185 | port as-is | `cbh-format` | `.2cbh` game/guiding-text/analysis records |
-| `v2/frame.rs` | 80 | port as-is | `cbh-format` | `.2cbg`/`.2cba` record framing (magic, sizes, checksum, spare) |
-| `v2/entities.rs` | 285 | port as-is | `cbh-format` | `.2lid` entities and game tags |
-| `v2/moves.rs` | 104 | port as-is | `cbh-format` | 2CBH move words: start + tree, position-independent by construction |
-| `v2/window.rs` | 105 | port as-is | `cbh-format` | Caller-owned move-record buffer |
-| `v2/annotations/mod.rs` | 118 | port as-is | `cbh-format` | `.2cba` annotation blocks |
-| `v2/annotations/layout.rs` | 191 | port as-is | `cbh-format` | Per-type annotation layouts |
-| `v2/annotations/tests.rs` | 116 | port as-is | `cbh-format` | Unit tests of the layouts |
-| `game/mod.rs` | 25 | port as-is | `cbh-format` | Shared game model (both formats read into it) |
-| `game/head.rs` | 35 | port as-is | `cbh-format` | Header fields in one shape |
-| `game/fields.rs` | 247 | port as-is | `cbh-format` | Result, ECO, packed date, round text |
-| `game/entities.rs` | 22 | port as-is | `cbh-format` | Players/tournament as both formats name them |
-| `game/start.rs` | 37 | port as-is | `cbh-format` | `Start`/`Setup` data types (no board) |
-| `game/annotations/mod.rs` | 155 | port as-is | `cbh-format` | Annotation blocks by position |
-| `game/annotations/quote.rs` | 210 | port as-is | `cbh-format` | Game quotations (type 13) |
-| `game/annotations/timing.rs` | 126 | port as-is | `cbh-format` | Evaluations, clock times, time controls |
-| `movetable/mod.rs` | 334 | port as-is | `cbh-chess` | 2CBH move-word table (position-independent words) |
-| `movetable/pieces.rs` | 86 | port as-is | `cbh-chess` | Set-up piece words |
-| `replay/mod.rs` | 317 | **chess swap** | `cbh-chess` | Play decoded moves, validate legality, incremental keys |
-| `replay/error.rs` | 104 | **chess swap** | `cbh-chess` | Replay error model |
-| `pgn/mod.rs` | 245 | **chess swap** | `cbh-parser` | PGN writer skeleton (SAN only at the boundary) |
-| `pgn/san.rs` | 251 | **chess swap** | `cbh-parser` | SAN written and read-as-in-the-wild |
-| `pgn/tree.rs` | 207 | **chess swap** | `cbh-parser` | Move tree → movetext in PGN order |
-| `pgn/commands.rs` | 398 | **chess swap** | `cbh-parser` | Full-form comment vocabulary (`[%cb…]`) |
-| `pgn/comments.rs` | 333 | **chess swap** | `cbh-parser` | Comments, NAGs, `[%csl]`/`[%cal]` placement |
-| `pgn/classic.rs` | 58 | **chess swap** | `cbh-parser` | Classic games through the same writer |
-| `view.rs` | 416 | port as-is | `cbh-parser` | `Base`: one view of a classic or 2CBH database |
-| `fixture.rs` | 331 | **chess swap** | `cbh-fixtures` | Test-only 2CBH database writer |
-| `fixture_cbh.rs` | 303 | **chess swap** | `cbh-fixtures` | Test-only classic writer (independent move encoder) |
-| `fixture_cbh/builder.rs` | 158 | port as-is | `cbh-fixtures` | File layout of a small classic database |
+| `file.rs` | 194 | port as-is | `cbvault-format` | Positional file reads (never maps); case-insensitive sibling resolution lives here |
+| `codepage.rs` | 193 | port as-is | `cbvault-format` | Windows single-byte code pages; encoding detection |
+| `cbh/mod.rs` | 379 | port as-is | `cbvault-format` | Classic `.cbh` reader orchestration (record → moves → entities) |
+| `cbh/bytes.rs` | 79 | port as-is | `cbvault-format` | Bounded big-endian integer reads |
+| `cbh/tables.rs` | 74 | port as-is | `cbvault-format` | The 256-byte move-mode translation tables (format data; see provenance) |
+| `cbh/record.rs` | 212 | port as-is | `cbvault-format` | The 46-byte header record of games and guiding texts |
+| `cbh/entities.rs` | 138 | port as-is | `cbvault-format` | `.cbp` `.cbt` `.cbc` `.cbs` namebases by id |
+| `cbh/annotations.rs` | 154 | port as-is | `cbvault-format` | Classic `.cba` annotation records |
+| `cbh/text.rs` | 70 | port as-is | `cbvault-format` | Guiding-text titles (one per language) |
+| `cbh/wide.rs` | 61 | port as-is | `cbvault-format` | 64-bit `.cbj` offsets for `.cbg`/`.cba` over 4 GiB |
+| `cbh/window.rs` | 100 | port as-is | `cbvault-format` | Caller-owned move-record buffer (zero-allocation scan) |
+| `cbh/moves.rs` | 217 | **chess swap** | `cbvault-format` + `cbvault-chess` | `.cbg` record split; start position decode; Chess960 index identification |
+| `cbh/decode.rs` | 399 | **chess swap** | `cbvault-chess` | Compact-encoding move decode against a board, tree walk with push/pop |
+| `cbh/pieces.rs` | 151 | **chess swap** | `cbvault-chess` | Piece lists of the compact encoding (piece numbering on captures) |
+| `v2/mod.rs` | 401 | port as-is | `cbvault-format` | 2CBH `.2cbh` reader orchestration |
+| `v2/bytes.rs` | 26 | port as-is | `cbvault-format` | Bounded little-endian reads |
+| `v2/record.rs` | 185 | port as-is | `cbvault-format` | `.2cbh` game/guiding-text/analysis records |
+| `v2/frame.rs` | 80 | port as-is | `cbvault-format` | `.2cbg`/`.2cba` record framing (magic, sizes, checksum, spare) |
+| `v2/entities.rs` | 285 | port as-is | `cbvault-format` | `.2lid` entities and game tags |
+| `v2/moves.rs` | 104 | port as-is | `cbvault-format` | 2CBH move words: start + tree, position-independent by construction |
+| `v2/window.rs` | 105 | port as-is | `cbvault-format` | Caller-owned move-record buffer |
+| `v2/annotations/mod.rs` | 118 | port as-is | `cbvault-format` | `.2cba` annotation blocks |
+| `v2/annotations/layout.rs` | 191 | port as-is | `cbvault-format` | Per-type annotation layouts |
+| `v2/annotations/tests.rs` | 116 | port as-is | `cbvault-format` | Unit tests of the layouts |
+| `game/mod.rs` | 25 | port as-is | `cbvault-format` | Shared game model (both formats read into it) |
+| `game/head.rs` | 35 | port as-is | `cbvault-format` | Header fields in one shape |
+| `game/fields.rs` | 247 | port as-is | `cbvault-format` | Result, ECO, packed date, round text |
+| `game/entities.rs` | 22 | port as-is | `cbvault-format` | Players/tournament as both formats name them |
+| `game/start.rs` | 37 | port as-is | `cbvault-format` | `Start`/`Setup` data types (no board) |
+| `game/annotations/mod.rs` | 155 | port as-is | `cbvault-format` | Annotation blocks by position |
+| `game/annotations/quote.rs` | 210 | port as-is | `cbvault-format` | Game quotations (type 13) |
+| `game/annotations/timing.rs` | 126 | port as-is | `cbvault-format` | Evaluations, clock times, time controls |
+| `movetable/mod.rs` | 334 | port as-is | `cbvault-chess` | 2CBH move-word table (position-independent words) |
+| `movetable/pieces.rs` | 86 | port as-is | `cbvault-chess` | Set-up piece words |
+| `replay/mod.rs` | 317 | **chess swap** | `cbvault-chess` | Play decoded moves, validate legality, incremental keys |
+| `replay/error.rs` | 104 | **chess swap** | `cbvault-chess` | Replay error model |
+| `pgn/mod.rs` | 245 | **chess swap** | `cbvault` | PGN writer skeleton (SAN only at the boundary) |
+| `pgn/san.rs` | 251 | **chess swap** | `cbvault` | SAN written and read-as-in-the-wild |
+| `pgn/tree.rs` | 207 | **chess swap** | `cbvault` | Move tree → movetext in PGN order |
+| `pgn/commands.rs` | 398 | **chess swap** | `cbvault` | Full-form comment vocabulary (`[%cb…]`) |
+| `pgn/comments.rs` | 333 | **chess swap** | `cbvault` | Comments, NAGs, `[%csl]`/`[%cal]` placement |
+| `pgn/classic.rs` | 58 | **chess swap** | `cbvault` | Classic games through the same writer |
+| `view.rs` | 416 | port as-is | `cbvault` | `Base`: one view of a classic or 2CBH database |
+| `fixture.rs` | 331 | **chess swap** | `cbvault-fixtures` | Test-only 2CBH database writer |
+| `fixture_cbh.rs` | 303 | **chess swap** | `cbvault-fixtures` | Test-only classic writer (independent move encoder) |
+| `fixture_cbh/builder.rs` | 158 | port as-is | `cbvault-fixtures` | File layout of a small classic database |
 | `pgnfile/mod.rs` | 714 | not needed | — | PGN *reading* is BlindBase's existing domain; export only here |
 | `pgnfile/lex.rs` | 697 | not needed | — | — |
 | `pgnfile/scan.rs` | 578 | not needed | — | — |
@@ -111,19 +111,19 @@
 
 | Ours | Notes |
 |---|---|
-| `cbh_format::cbh::bytes::{NameBuf, MAX_NAME_FIELD}` | A reusable buffer a name field decodes into; the owned `text()` stays the same decode rules |
-| `cbh_format::cbh::{Entities::player_into, tournament_into}` | The same names borrowed into caller buffers — no `Vec` per lookup, no `String` per name |
-| `cbh_chess::start::{StartCache, start_board_cached, standard_board}` | One standard board per process instead of a FEN parse per game |
-| `cbh_chess::decode::MoveSink::wants_checkers` | A sink that reads the cached `checkers` (the SAN suffix does) gets a checkers-maintaining walk; default `false` |
-| `cbh_parser::pgn::{export_parallel, export_range, ExportStats, DEFAULT_BATCH}` | The Rayon export pipeline, record-ordered and byte-identical to the sequential writer |
+| `cbvault_format::cbh::bytes::{NameBuf, MAX_NAME_FIELD}` | A reusable buffer a name field decodes into; the owned `text()` stays the same decode rules |
+| `cbvault_format::cbh::{Entities::player_into, tournament_into}` | The same names borrowed into caller buffers — no `Vec` per lookup, no `String` per name |
+| `cbvault_chess::start::{StartCache, start_board_cached, standard_board}` | One standard board per process instead of a FEN parse per game |
+| `cbvault_chess::decode::MoveSink::wants_checkers` | A sink that reads the cached `checkers` (the SAN suffix does) gets a checkers-maintaining walk; default `false` |
+| `cbvault::pgn::{export_parallel, export_range, ExportStats, DEFAULT_BATCH}` | The Rayon export pipeline, record-ordered and byte-identical to the sequential writer |
 
 ## Workspace mapping
 
 | Upstream | Ours |
 |---|---|
-| `cbformat` (minus `pgnfile`, `dbitems`) | `cbh-format` (bytes/model) + `cbh-chess` (movetable/replay/decode) + `cbh-parser` (view/pgn/archives) |
-| `cbformat::fixture`, `cbformat::fixture_cbh` | `cbh-fixtures` (test-only, `publish = false`) |
-| `cbtool` surface | `cbh-cli` (new; thin shell over `cbh-parser`) |
+| `cbformat` (minus `pgnfile`, `dbitems`) | `cbvault-format` (bytes/model) + `cbvault-chess` (movetable/replay/decode) + `cbvault` (view/pgn/archives) |
+| `cbformat::fixture`, `cbformat::fixture_cbh` | `cbvault-fixtures` (test-only, `publish = false`) |
+| `cbtool` surface | `cbvault-cli` (new; thin shell over `cbvault`) |
 | `cbformat` `docs/format-notes.md`, `docs/api.md` | Facts for `SPEC.md`, re-expressed with source notes |
 
 ## Reproducing the snapshot

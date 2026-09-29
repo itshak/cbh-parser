@@ -3,7 +3,7 @@
 ## Why
 
 The project reads three format families and two containers, so the name
-`cbh-parser` is both an understatement and an ambiguity: `cbh` is a *format*
+`cbvault` is both an understatement and an ambiguity: `cbh` is a *format*
 name, so the crate name claims a narrower scope than the code has, and it
 collides in search results with the unrelated upstream project of the same
 name. BlindBase — the only consumer — has to write this dependency in its
@@ -14,9 +14,9 @@ The decision and the full rename map are ADR-006. This change executes it.
 
 ## What Changes
 
-- **Crates**: `cbh-format` → `cbvault-format`, `cbh-chess` → `cbvault-chess`,
-  `cbh-parser` → `cbvault`, `cbh-fixtures` → `cbvault-fixtures`,
-  `cbh-cli` → `cbvault-cli` with the binary `cbh` → `cbvault`.
+- **Crates**: `cbh-format`, `cbh-chess`, `cbh-parser`, `cbh-fixtures` and `cbh-cli` become
+  `cbvault-format`, `cbvault-chess`, `cbvault`, `cbvault-fixtures` and `cbvault-cli`,
+  and the binary `cbh` becomes `cbvault`.
 - **Crate paths**: `cbh_parser::` → `cbvault::`, `cbh_format::` →
   `cbvault_format::`, and so on, in every `use`, doc link, doc test and
   intra-doc path.
@@ -30,7 +30,7 @@ The decision and the full rename map are ADR-006. This change executes it.
 - **Docs and config**: `README.md`, `AGENTS.md`, `docs/*`, `openspec/config.yaml`,
   spec purposes, `THIRD_PARTY_NOTICES.md`, `benchmarks/*`, CI and the crate
   `//!` headers.
-- **Repository and local directory**: `itshak/cbh-parser` → `itshak/cbvault`
+- **Repository and local directory**: `itshak/cbvault` → `itshak/cbvault`
   and the checkout directory, with the remote redirect left to the host.
 - **Historical records keep their names**: the archived `bootstrap-cbh-parser`
   change, the git history, `vendor/upstream-snapshot`, and provenance entries
@@ -49,7 +49,7 @@ The decision and the full rename map are ADR-006. This change executes it.
 
 ## Verification
 
-- `git grep -I -l 'cbh-parser\|cbh_parser\|cbh-format\|cbh_format\|cbh-chess\|cbh_chess\|cbh-cli\|cbh-fixtures\|CBH_TEST_DB'`
+- `git grep -I -l 'cbvault\|cbvault\|cbvault-format\|cbvault_format\|cbvault-chess\|cbvault_chess\|cbvault-cli\|cbvault-fixtures\|CBVAULT_TEST_DB'`
   returns only the historical records named above (archive, history, vendor,
   upstream provenance) — asserted by a test so the rename cannot rot.
 - `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`,
@@ -62,5 +62,5 @@ The decision and the full rename map are ADR-006. This change executes it.
   changes).
 - Affected code: every crate, all five, plus the workspace manifest and lock
   file. The lock file changes package names only.
-- Consumers: any code depending on `cbh-parser` breaks at compile time, by
+- Consumers: any code depending on `cbvault` breaks at compile time, by
   design.

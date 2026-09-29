@@ -91,11 +91,11 @@ Reproduce with the same tool build and machine; the asset hashes are in
 
 | Asset | Env var (default) | Generation | Phase that reads it |
 |---|---|---|---|
-| Classic Mega 2025 set (`.cbh .cbg .cbj .cba .cbp .cbt .cbc .cbs .cbe .cbl .cbm .cbtt .cko .cpo .flags .ico .ini` + `.bmp/` 272 + `.html/` 3,582) | `CBH_TEST_DB` = `Mega Database 2025/Mega Database 2025` (base name) | classic (46-byte records, 11,151,119) | 0.4 baseline, 2.x readers, 3.x decode, 4.x annotations, 6.1 façade |
+| Classic Mega 2025 set (`.cbh .cbg .cbj .cba .cbp .cbt .cbc .cbs .cbe .cbl .cbm .cbtt .cko .cpo .flags .ico .ini` + `.bmp/` 272 + `.html/` 3,582) | `CBVAULT_TEST_DB` = `Mega Database 2025/Mega Database 2025` (base name) | classic (46-byte records, 11,151,119) | 0.4 baseline, 2.x readers, 3.x decode, 4.x annotations, 6.1 façade |
 | Master archive (`.cbv`, 1,739,924,298 B; **complete**, SHA-256 `d3ae0bcf…`) | `CBH_TEST_CBV` = `Mega Database 2025/Mega Database 2025.cbv` | container | 0.3 facts, 5.1 archive reader (all members) |
 | Password archive (`.cbz`) | `CBH_TEST_CBZ` — **not present on this machine** | container + DES | 5.2 (needs an owner-provided sample) |
-| 2CBH set, large: `.2cbh` 21,143,232; `.2cbg` 31,391,312; `.2cba` 81,482,912; `.2lid` 204,328,891; `.2lgd` 24,709,132; `.2lcd` 2,445,312; `.ini` 2,589 | `CBH_TEST_DB_2CBH` = `~/Documents/ChessBase/Download/MyPGNDownloads.2cbh` | 2CBH | 2.x readers, 3.x decode (2CBH path), 6.1 |
-| 2CBH set, small (`AutoSave.*`: `.2cbh` 576, `.2cbg` 552, `.2cba` 480, `.2lid` 8,688, `.2lgd` 1,548, `.2lcd` 40,960) | `CBH_TEST_DB_2CBH_SMALL` = `~/Documents/ChessBase/MyWork/AutoSave.2cbh` | 2CBH | smoke tests |
+| 2CBH set, large: `.2cbh` 21,143,232; `.2cbg` 31,391,312; `.2cba` 81,482,912; `.2lid` 204,328,891; `.2lgd` 24,709,132; `.2lcd` 2,445,312; `.ini` 2,589 | `CBVAULT_TEST_DB_2CBH` = `~/Documents/ChessBase/Download/MyPGNDownloads.2cbh` | 2CBH | 2.x readers, 3.x decode (2CBH path), 6.1 |
+| 2CBH set, small (`AutoSave.*`: `.2cbh` 576, `.2cbg` 552, `.2cba` 480, `.2lid` 8,688, `.2lgd` 1,548, `.2lcd` 40,960) | `CBVAULT_TEST_DB_2CBH_SMALL` = `~/Documents/ChessBase/MyWork/AutoSave.2cbh` | 2CBH | smoke tests |
 | 2CBH personalities: 6 sets `Books/Personalities/Personality-*.2cbh` (2,688–5,376 B; each with `.2cbg/2cba/2lid/2lgd/2lcd`) | `CBH_TEST_2CBH_PERSONALITIES` = `~/Documents/ChessBase/Books/Personalities` | 2CBH | smoke tests |
 | Dual-format pairs: `History/Year_2026/**` (726 files; twins in `06-June` (1 pair) and `07-July` (1 pair: `2026_07_05_Sunday.{cbh,2cbh}`, 828/384 B, with boosters `.cit .cib .cit2 .cib2`) | `CBH_TEST_PAIRS` = `~/Documents/ChessBase/History/Year_2026` | classic + 2CBH | Phase 2/3 equality tests (same games, both generations) |
 | ChessBase exports (PGN/HTML) for golden comparisons | `CBH_TEST_PGN_EXPORT` (set per run) | output | 3.5 SAN equality; local-only |

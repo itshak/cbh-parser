@@ -38,7 +38,7 @@ identical): `asdfjkl/cbh2pgn` @ `42b3592738062db1f768239e85df1b98cb1cead9`,
 ```sh
 CBH_ORACLE=1 scripts/oracles/cbh2pgn.sh "/path/to/db-base" /tmp/out.pgn
 CBH_ORACLE=1 scripts/oracles/uncbv.sh list "/path/to/db.cbv"
-CBH_ORACLE=1 cargo test -p cbh-fixtures --test classic_fixtures oracle -- --nocapture
+CBH_ORACLE=1 cargo test -p cbvault-fixtures --test classic_fixtures oracle -- --nocapture
 ```
 
 Overrides: `CBH_ORACLE_PYTHON`, `CBH_ORACLE_CBH2PGN`, `CBH_ORACLE_UNCBV`,

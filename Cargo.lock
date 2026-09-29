@@ -42,48 +42,48 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "37b2a672a2cb129a2e41c10b1224bb368f9f37a2b16b612598138befd7b37eb5"
 
 [[package]]
-name = "cbh-chess"
+name = "cbvault"
 version = "0.1.0"
 dependencies = [
- "cbh-fixtures",
- "cbh-format",
- "gigachess",
-]
-
-[[package]]
-name = "cbh-cli"
-version = "0.1.0"
-dependencies = [
- "cbh-format",
- "cbh-parser",
-]
-
-[[package]]
-name = "cbh-fixtures"
-version = "0.1.0"
-dependencies = [
- "cbh-format",
- "gigachess",
-]
-
-[[package]]
-name = "cbh-format"
-version = "0.1.0"
-dependencies = [
- "cbh-fixtures",
- "memmap2",
-]
-
-[[package]]
-name = "cbh-parser"
-version = "0.1.0"
-dependencies = [
- "cbh-chess",
- "cbh-fixtures",
- "cbh-format",
+ "cbvault-chess",
+ "cbvault-fixtures",
+ "cbvault-format",
  "criterion",
  "gigachess",
  "rayon",
+]
+
+[[package]]
+name = "cbvault-chess"
+version = "0.1.0"
+dependencies = [
+ "cbvault-fixtures",
+ "cbvault-format",
+ "gigachess",
+]
+
+[[package]]
+name = "cbvault-cli"
+version = "0.1.0"
+dependencies = [
+ "cbvault",
+ "cbvault-format",
+]
+
+[[package]]
+name = "cbvault-fixtures"
+version = "0.1.0"
+dependencies = [
+ "cbvault-format",
+ "gigachess",
+]
+
+[[package]]
+name = "cbvault-format"
+version = "0.1.0"
+dependencies = [
+ "cbvault-fixtures",
+ "memmap2",
 ]
 
 [[package]]

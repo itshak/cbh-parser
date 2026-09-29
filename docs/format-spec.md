@@ -1,15 +1,15 @@
-# ChessBase classic format — cbh-parser format spec
+# ChessBase classic format — cbvault format spec
 
 > **The source of truth** for everything this library knows about the classic
 > ChessBase format (`.cbh` / `.cba` / `.cbg` family): byte layouts, type
 > codes, character tables, and the exact reading-form (PGN) rules our output
-> must follow. Every decode path in `crates/cbh-format` and `crates/cbh-parser`
+> must follow. Every decode path in `crates/cbvault-format` and `crates/cbvault`
 > must be traceable to a row here, and every discovery (new symbol, new
 > nuance, gold-comparison finding) is added here as it lands.
 >
 > **Provenance**: clean-room facts — observed from databases we are given
 > (Mega Database 2025), from ChessBase's own PGN export of them, from
-> measurements in `crates/cbh-parser/examples/gold_pgn.rs`, and from the
+> measurements in `crates/cbvault/examples/gold_pgn.rs`, and from the
 > MIT-ported `vendor/upstream-snapshot` code. Nothing from unlicensed or GPL
 > sources. See `docs/provenance.md`.
 >
@@ -140,7 +140,7 @@ games 96/113). **✓ implemented**
 (`e1h1`, `e1a1`, Chess960 included); the null move is the `NULL_MOVE` word,
 which ChessBase exports as `Z0` and we export as `--` — see **§10 #2** for why,
 and **§10 #1** for the SAN disambiguation we do not copy. Stored order is depth-first, main line first
-at every position. All move semantics live in `gigachess`/`cbh-chess`
+at every position. All move semantics live in `gigachess`/`cbvault-chess`
 (no second chess implementation). **✓ implemented**
 
 ---
@@ -621,7 +621,7 @@ are ChessBase's own SAN bug, which we do not copy (§10).
 
 - `SPEC.md` — field semantics, moves, tag rules (this file never contradicts
   it; where they overlap, byte layouts here are the ones `code` reads).
-- `openspec/specs/cbh-database/spec.md` — the OpenSpec capability spec.
+- `openspec/specs/cbvault/spec.md` — the OpenSpec capability spec.
 - `docs/provenance.md` — where each module's code came from.
 - `vendor/upstream-snapshot/docs/format-notes.md` — MIT-ported notes from the
   ancestor project (facts reference; the gold PGN outranks them on conflict).

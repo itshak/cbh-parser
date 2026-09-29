@@ -1,8 +1,8 @@
-# Bootstrap cbh-parser
+# Bootstrap cbvault
 
 ## Why
 
-ChessBase databases are the de-facto standard for tournament players (Mega Database, personal databases, magazine archives) and the anchor of BlindBase's BYOD strategy (`strategy/decisions/013-gigabase-licensing-and-byod.md` in the BlindBase repo). BlindBase today reads `.pgn`, `.bbdb` and `.bbgb`; `cbh-parser` closes the gap with an MIT-licensed Rust reader for the classic `.cbh` family, the 2CBH family and `.cbv`/`.cbz` archives.
+ChessBase databases are the de-facto standard for tournament players (Mega Database, personal databases, magazine archives) and the anchor of BlindBase's BYOD strategy (`strategy/decisions/013-gigabase-licensing-and-byod.md` in the BlindBase repo). BlindBase today reads `.pgn`, `.bbdb` and `.bbgb`; `cbvault` closes the gap with an MIT-licensed Rust reader for the classic `.cbh` family, the 2CBH family and `.cbv`/`.cbz` archives.
 
 A working MIT implementation exists to build on — `cbformat` in `oschess-cb-bridge` — but its chess layer is a hand-rolled core (`chesscore`). BlindBase standardizes on `gigachess` (ADR-013/015): one chess core, 16-bit `moves2`, incremental Polyglot Zobrist, zero-allocation replay. Two chess implementations in one stack is neither fast nor maintainable, so this project ports `cbformat` and re-bases it on `gigachess`.
 
@@ -10,7 +10,7 @@ No CBH reader for macOS/Linux with accessibility ambitions exists today. The fas
 
 ## What Changes
 
-1. **Project bootstrap**: a Rust workspace (`cbh-format`, `cbh-chess`, `cbh-parser`, `cbh-cli`) with OpenSpec workflows, MIT license, provenance ledger and CI-ready toolchain.
+1. **Project bootstrap**: a Rust workspace (`cbvault-format`, `cbvault-chess`, `cbvault`, `cbvault-cli`) with OpenSpec workflows, MIT license, provenance ledger and CI-ready toolchain.
 2. **Deep research (Phase 0)**: verify format facts against a real Mega Database (local-only), measure the upstream baseline, freeze the port/module inventory, and record the clean-room protocol for non-MIT sources.
 3. **Port of `cbformat` onto `gigachess`**: index, namebase, game-decode, annotation, replay and PGN modules, with `chesscore` deleted everywhere — `moves2` as the move currency, gigachess for legality/FEN/SAN/Chess960/Polyglot keys, zero-allocation streaming.
 4. **`.cbv` / `.cbz` container reader** (clean-room; `uncbv` as a test oracle only).

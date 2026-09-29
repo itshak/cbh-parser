@@ -36,7 +36,7 @@ localised to one step rather than to the whole rename.
 
 ## The capability rename is the delicate step
 
-`openspec/specs/cbh-database/` becomes `openspec/specs/cbvault/`, and the
+`openspec/specs/cbvault/` becomes `openspec/specs/cbvault/`, and the
 *active* `bootstrap-cbh-parser` change carries a delta against the old
 capability path. Both the spec directory and that delta move together in task
 1.1, because a delta pointing at a capability that no longer exists fails

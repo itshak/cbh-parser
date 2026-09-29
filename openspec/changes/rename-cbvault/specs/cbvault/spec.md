@@ -1,7 +1,7 @@
 # cbvault
 
-> This change renames the capability `cbh-database` to `cbvault` (ADR-006).
-> The directory `openspec/specs/cbh-database/` moves to
+> This change renames the capability `cbvault` to `cbvault` (ADR-006).
+> The directory `openspec/specs/cbvault/` moves to
 > `openspec/specs/cbvault/` in task 1.1, before this delta is applied on
 > archive; the requirement text below is the only addition, and the naming rule
 > is stated as a requirement because it is enforced by a test.

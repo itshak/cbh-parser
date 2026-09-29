@@ -2,8 +2,8 @@
 
 - **Status:** Accepted
 - **Date:** 2026-09-29
-- **Deciders:** cbvault (cbh-parser) maintainers
-- **Applies to:** `cbh_parser::pgn::{export_parallel, export_range}`
+- **Deciders:** cbvault (cbvault) maintainers
+- **Applies to:** `cbvault::pgn::{export_parallel, export_range}`
 - **Context:** `pgn-export-sota-performance` task 5 — Rayon export of the
   reference database.
 

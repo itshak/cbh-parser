@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-09-29
-- **Deciders:** cbvault (cbh-parser) maintainers
+- **Deciders:** cbvault (cbvault) maintainers
 - **Applies to:** every use of a `gigachess` "fast" board primitive, and to any
   future one we add
 - **Context:** `pgn-export-sota-performance` — the SAN split, and the five games
@@ -56,7 +56,7 @@ ten threads.
 **3. Every "fast" primitive gets a property test against its slow twin.**
 `gigachess` 0.1.4's own `tests/play_fast_property.rs` compares `play_fast` with
 `play` over 100,000 positions; our contract is pinned by
-`crates/cbh-parser/tests/san_split.rs` and by a whole-database invariant run
+`crates/cbvault/tests/san_split.rs` and by a whole-database invariant run
 asserting the rendered notation equals the single-call renderer's for every ply.
 
 **4. When the chess core is the bottleneck, change the chess core.** The SAN
