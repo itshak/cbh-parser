@@ -523,10 +523,25 @@ on the knee, and neither change makes the export measurably faster.** The
 numbers are in `benchmarks/baseline.json` under `buffer_sweep` and
 `second_round_inline_san_and_write_path`:
 
+The like-for-like run — same database, same machine, one after the other, both
+writing the annotations, output to `/dev/null` — is the table below. It also
+corrects the comparison above: the tool's own PGN path used to drop every
+annotation, so the earlier single-threaded number was ours *without* comments
+against the ancestor's *with* them. Fixed, and the export now carries the
+annotations and lands within 2 % of the ancestor's wall clock while spending a
+third of the CPU more (the ancestor's chess core is cheaper per move; what we
+win single-threaded is the I/O, not the chess) and 8.5× ahead with the Rayon
+pipeline.
+
 | | upstream `cbformat` | ours |
 |---|---|---|
-| wall clock, 11.1 M records, output `/dev/null` | **141.5 s** | **128–138 s** (1 thread, 128 s after the second round) · **18.8–20 s** (10 threads) |
-| user / system | 110.0 s / **30.3 s** | 129–135 s / **0.7 s** |
+| wall clock, 11.1 M records, output `/dev/null` | **138.5 s** | **136.0 s** (1 thread) · 48.2 s (2) · **16.2 s** (10 threads) |
+| user / system | 108.9 s / **29.3 s** | 133.5 s / **0.9 s** · 95.6 s / 1.0 s (10 threads) |
+| records per second | 80,500 | 82,004 · 231,282 · **687,551** |
+| PGN bytes | 7,677,061,954 | 7,683,725,549 |
+| peak RSS | **7.69 GB** (the whole export accumulated in one `String`, then one `fs::write`) | **3.19 GB** (one game's worth of reused buffers) |
+| records dropped | 1,749, silently | 5 typed errors, each named |
+| gold games exact | 313,566 (74.8 %) | **407,350 (97.1 %)** |
 | PGN bytes produced (whole database) | 7.68 GB | 7.56 GB |
 | peak RSS (`/usr/bin/time -l`, macOS) | **5.89 GB** (the whole export accumulated in one `String`, then one `fs::write`) | **1.64 GB** (one game's worth of reused buffers) |
 | records dropped | 1,749 (texts or render errors, silently) | 5 typed errors, each named |

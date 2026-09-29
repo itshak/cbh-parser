@@ -670,6 +670,13 @@ impl PgnWriter {
         self.game.clear();
         write_tags(&mut self.game, header, entities, &start, &board, &mut self.names).map_err(as_io)?;
         let stats = walk_from(what, game, &start, &mut self.tree).map_err(as_io)?;
+        // An annotation record with no items writes nothing anywhere: no game
+        // comment, no note before or after a move, no `[%evp]`. Treating it as
+        // no annotations at all takes the movetext's direct path, which is the
+        // same bytes without the per-move annotation machinery - 10.8 million
+        // of the 11.1 million games in the reference database have no
+        // annotations, and the machinery cost them 45 seconds of the export.
+        let anns = anns.filter(|a| !a.is_empty());
         match anns {
             None => emit(&self.tree, &mut Bare, &mut self.game, &mut self.steps).map_err(as_io)?,
             Some(a) => {

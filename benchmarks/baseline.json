@@ -660,6 +660,58 @@
       },
       "conclusion": "the defaults are at the knee, not on a slope: raising the write buffer buys at most a couple of per cent for 0.2 % more memory and no measurable gain, and raising the chunk size trades memory for a few per cent. Both are tunable per run now, and neither default changes.",
       "side_fix": "`--pgn-last` only reached the parallel path before this round; the sequential walk ignored it and exported the whole database. It bounds both now, which is what the sweeps above needed."
+    },
+    "head_to_head_with_upstream": {
+      "recorded": "2026-09-29",
+      "setup": "the whole reference database (11,151,119 records, 7.68 GB of PGN), output to /dev/null, runs one after another on the same idle machine; upstream is vendor/upstream-snapshot's `dump_classic_pgn` example (its own export, annotations included, accumulated in one String and written once), ours is the `megabase` example, which now writes the same bytes the library does",
+      "upstream_cbformat": {
+        "real_seconds": 138.54,
+        "user_seconds": 108.86,
+        "sys_seconds": 29.34,
+        "peak_rss_bytes": 7685046272,
+        "games_written": 11149370,
+        "records_silently_skipped": 1749,
+        "pgn_bytes": 7677061954
+      },
+      "ours_one_thread": {
+        "real_seconds": 135.98,
+        "user_seconds": 133.52,
+        "sys_seconds": 0.9,
+        "peak_rss_bytes": 3188080640,
+        "records_per_second": 82004,
+        "pgn_bytes": 7683725549,
+        "typed_failures": 5
+      },
+      "ours_two_threads": {
+        "real_seconds": 48.21,
+        "user_seconds": 89.98,
+        "peak_rss_bytes": 3205349376,
+        "records_per_second": 231282
+      },
+      "ours_ten_threads": {
+        "real_seconds": 16.22,
+        "user_seconds": 95.57,
+        "sys_seconds": 0.99,
+        "peak_rss_bytes": 3273981952,
+        "records_per_second": 687551,
+        "pgn_bytes": 7683725549
+      },
+      "reading": [
+        "ten threads: 8.5x the ancestor's wall clock, 3.4x its throughput, 2.3x less peak memory",
+        "one thread: 1.9 % faster in wall clock and 33x less system time, but 22 % MORE cpu (133.5 s against 108.9 s) - the ancestor's chesscore is cheaper per move than gigachess, and what we win single-threaded is the I/O, not the chess",
+        "the ancestor spends 29.3 s in the system building and writing one 7.7 GB String; we stream 1 MiB at a time and spend 0.9 s",
+        "our 5 failures are typed and named; the ancestor silently drops 1,749 records",
+        "bytes: ours 7,683,725,549 against 7,677,061,954 (0.09 %), which is the annotation-rendering and SAN-disambiguation differences, not dropped games"
+      ],
+      "gold_parity": {
+        "ours": "407,350 of 419,385 exact (97.08 %), 11,977 of the 12,035 differences deliberate (minimal legal SAN against ChessBase's over-disambiguation), 0 annotation-read and 0 decode errors",
+        "upstream": "313,566 of 419,385 exact (74.8 %), 105,819 differences, 4,691 of them annotation renderings"
+      },
+      "two_bugs_this_comparison_found": [
+        "the `megabase` example's PGN path passed `None` for the annotations, so `--pgn-out` dropped every comment of the database and its byte count was 128 MB short of the library's own export. Fixed (it now reads them through `Annotations::of` with the wide table, like the gold harness), and the output is byte-identical to `pgn::export_range` over the same records.",
+        "with the annotations back, the single-threaded export measured 180.6 s: passing `Some(&anns)` for every game routed 10.8 million annotation-free games through the annotation machinery (an index build and two note lookups per move). An empty record writes nothing anywhere, so `write_game` now treats one as no annotations at all: 180.6 s -> 136.0 s, ten threads 20.1 s -> 16.2 s, with the same bytes (verified on a 200,000-record prefix and by the gold harness).",
+        "The archived change's single-threaded win was measured through the first bug, so its 138.5 s against the ancestor's 141.5 s compared our annotation-free export with the ancestor's annotated one. The corrected comparison is in this entry."
+      ]
     }
   }
 }

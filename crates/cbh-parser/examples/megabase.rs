@@ -15,7 +15,7 @@
 use cbh_chess::decode::{GameRef, MoveSink, NULL_MOVE, start_as_played, walk_from};
 use cbh_chess::start::{Start, start_board};
 use cbh_format::cbh::moves::GameMoves;
-use cbh_format::cbh::{Entities, GameHeader, Headers};
+use cbh_format::cbh::{Annotations, Entities, GameHeader, Headers, Wide};
 use cbh_format::file::DbFile;
 use cbh_format::game::RecordKind;
 use cbh_parser::pgn::PgnWriter;
@@ -229,6 +229,9 @@ fn run(
         );
         return;
     }
+    let annotations = Annotations::open(base).expect("the .cba file");
+    let wide = Wide::open(base).ok();
+    let mut ann_scratch: Vec<u8> = Vec::new();
     let mut sample_sink: Option<BufWriter<File>> =
         if decode_only { None } else { sample_out.map(|p| BufWriter::new(File::create(p).expect("sample-out"))) };
     let mut pgn_bytes: u64 = 0;
@@ -267,6 +270,9 @@ fn run(
                 &mut buf,
                 &mut counting,
                 &mut writer,
+                &annotations,
+                wide.as_ref(),
+                &mut ann_scratch,
                 pgn_sink.as_mut(),
                 sample_sink.as_mut(),
                 &is_sample,
@@ -338,6 +344,9 @@ fn one(
     buf: &mut cbh_chess::tree::MovesBuf,
     counting: &mut Counter,
     writer: &mut PgnWriter,
+    annotations: &Annotations,
+    wide: Option<&Wide>,
+    ann_scratch: &mut Vec<u8>,
     pgn_sink: Option<&mut BufWriter<File>>,
     sample_sink: Option<&mut BufWriter<File>>,
     is_sample: &dyn Fn(u32) -> bool,
@@ -455,12 +464,22 @@ fn one(
         *annotated += 1;
     }
     if let Some(out) = pgn_sink {
-        let mut tmp = Vec::new();
-        match writer.write_game(&mut tmp, &header, entities, &game, None) {
-            Ok(()) => {
-                *pgn_bytes += tmp.len() as u64;
-                out.write_all(&tmp).expect("pgn write");
+        // The game's annotations, the way `pgn::export_parallel` and the gold
+        // harness read them: the export is the whole game, comments included.
+        // Passing `None` here silently dropped every one of them, and the byte
+        // count below was 128 MB short of the library's own export.
+        let anns = match annotations.of(&header, wide, ann_scratch) {
+            Ok(a) => Some(a),
+            Err(e) => {
+                if failures.len() < 50 {
+                    failures.push(format!("game {rec_id}: annotations: {e}"));
+                }
+                None
             }
+        };
+        let before = out.buffer().len() as u64;
+        match writer.write_game(out, &header, entities, &game, anns.as_ref()) {
+            Ok(()) => *pgn_bytes += out.buffer().len() as u64 - before,
             Err(e) => {
                 if failures.len() < 50 {
                     failures.push(format!("game {rec_id}: pgn: {e}"));
