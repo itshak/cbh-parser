@@ -116,13 +116,40 @@ Evidence gathered so far:
    set (see the evidence table). Tests stay env-gated.
 5. `uncbv`'s own failure at `0x3A400000` is the zero region — not a format finding.
 
-## `.cbz` (password-protected container)
+## `.cbz` (password-protected container) — **closed**
 
-- **No `.cbz` sample exists on this machine** (searched `~/Documents/ChessBase` and
-  `~/Documents`). Nothing about the DES-CBZ key derivation can be verified from file
-  inspection here. **Open for task 5.2**; needs a `.cbz` sample (owner-provided,
-  env-gated `CBH_TEST_CBZ`) plus the public description of the legacy scheme; the
-  implementation stays clean-room (no source reading).
+This said "no `.cbz` sample exists on this machine", which was true when written and
+is false now: `vendor/oracles/uncbv/tests/` carries `small.cbz` beside its plaintext
+`decrypted_small.cbv`. The container became *observable*.
+
+Established, each with the comparison that shows it:
+
+- **Key = the password's first eight bytes, used as they are.** Password found by
+  running the oracle and comparing SHA-256 (`password` reproduces the known
+  plaintext; `chessbase1`, `password2`, `passwordXX`, `abcdefgh` do not). Then
+  confirmed with the crate's FIPS-verified `Des`: `dec(C[..8]) == P[..8]`.
+- **DES in ECB over the whole file.** No IV, no salt, no plaintext header — the
+  container's own header is enciphered. Confirmed over the entire sample: **all
+  3,000 bytes match**, first mismatch at `None`.
+- **The password check is the container's own header**, read from one eight-byte
+  block. A wrong password is `Error::WrongPassword`, never a corruption.
+- **The header is not a constant.** `08 00 1F 0F AD 00 03 00` has `1F 0F` = 3,871 =
+  the reference archive's member count; `small.cbv`'s `08 00 0C 00 AD 00 03 00` has
+  `0C 00` = 12. Bytes 2–3 are the count, so the header is matched structurally and
+  the stated count is cross-checked against the one the pool offset implies.
+
+Still **open**, and recorded rather than papered over: the key rule for passwords
+that are not exactly eight bytes. The oracle panics below eight and deciphers under
+an unidentified key above it — including the anomaly that `password22` and
+`password33` give byte-identical output while `passwordAA`/`AB`/`99`/`11`/`a1`, of the
+same length and prefix, each differ. Rejected against the oracle's own output:
+first-8, last-8, cyclic, reversed, XOR-fold, sum-fold, bytes 8..16, all 8!
+permutations, whole-byte transforms, double-DES, and MD5/SHA-1/SHA-256 with and
+without a trailing newline. This reader uses first-eight-bytes, zero-padded.
+
+The implementation stayed clean-room: the oracle's **source was never opened**; its
+binary was run and its output compared. The one fact quoted from it is a panic
+message, which is an output.
 
 ## Evidence notes
 

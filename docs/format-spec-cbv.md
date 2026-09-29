@@ -15,7 +15,9 @@ implemented in `cbvault_format::archive`.
 **Status.** The container is complete and fully verified. The member-stream
 compression is **partly open**: one of the four modes is decoded and verified,
 three are not, and this document says exactly how far the analysis got and why.
-The `.cbz` scheme is **open end to end** for want of a sample.
+The `.cbz` scheme is **established** — DES-ECB, key = the password's first eight
+bytes — from a sample-and-plaintext pair in the oracle's fixtures. What remains
+open is narrower and is listed under `.cbz` below.
 
 ## The sample
 
@@ -290,38 +292,87 @@ whole of the remaining work, with no change to `Archive` or to extraction.
 
 ## `.cbz`
 
-**No `.cbz` sample exists on this machine.** [facts] searched
-`~/Documents/ChessBase` and `~/Documents` and found none. Nothing about the
-scheme can be verified from file inspection here, and this document does not
-guess.
+**Established.** A `.cbz` is a `.cbv` whose every byte is enciphered with
+**DES in ECB**, under a key that is **the password's first eight bytes**.
+There is no plaintext header, no salt and no IV: the container's own header is
+enciphered like everything else.
 
-What is publicly established and implemented:
+### The evidence
 
-- A `.cbz` is a `.cbv` whose bytes are enciphered; the change plan and the
-  requirement in `openspec/specs/cbvault/spec.md` name a **legacy DES** scheme.
-- **DES itself (FIPS 46-3) is implemented** in `cbvault_format::des` and
-  verified against the standard's four published known-answer vectors. It is
-  here because a published standard with published vectors can be *proved*
-  correct without a `.cbz` sample.
+`vendor/oracles/uncbv/tests/` carries a `.cbz` **and its plaintext**:
+`small.cbz` (3,000 B) beside `decrypted_small.cbv` (3,000 B). That pair is what
+turned this section from guesswork into observation. The oracle's source was
+not read; its binary was run and its output compared.
 
-What is **open**, and is left open rather than invented:
+The password was found by running `uncbv decrypt small.cbz` with candidate
+passwords and comparing SHA-256 against the known plaintext. Each capture was
+run twice and is byte-stable:
 
-1. **The key derivation.** How a password becomes a DES key — padding, salt,
-   iteration count, whether it is the password's first eight bytes or a digest
-   of it — cannot be observed without a sample. `des::KeyDerivation` is a trait
-   with **no implementation**, so filling it in later is an addition, not a
-   redesign.
-2. **The chaining mode.** Whether the container is DES in ECB over 8-byte
-   blocks, or CBC with a stored IV, or a chained variant, is not observable.
-3. **The password check.** DES carries no integrity check, so the container
-   must hold one, and its form is unknown. This is why
-   `Error::WrongPassword` — which the crate's error model already has and
-   `open` will return — cannot yet be produced honestly.
+```
+password     -> 4addc1ae6d94...  matches the known plaintext
+chessbase1   -> 453e42abad21...
+password2    -> 62a890066b02...
+```
 
-Consequently `des::open` always returns a typed `Error::Corrupt` naming those
-three open points. It never returns bytes. The real-sample test is gated on
-`CBH_TEST_CBZ` and **fails loudly** when a sample is present, so the gate cannot
-pass silently.
+The scheme was then confirmed with the crate's own FIPS-verified `Des` and
+nothing else:
+
+```
+C[..8] = 47 87 2B 61 A2 DE 89 55
+P[..8] = 08 00 0C 00 AD 00 03 00
+key    = 70 61 73 73 77 6F 72 64      ("password")
+dec(C) = 08 00 0C 00 AD 00 03 00      == P[..8]
+```
+
+and over the whole sample: **all 3,000 bytes match**, with no mismatch at any
+offset. The archive then opens through the normal reader, lists its 12
+members, and `small.cbh` decodes to exactly the bytes the oracle extracted.
+
+### The header carries the member count
+
+`08 00 1F 0F AD 00 03 00` is not a magic. Bytes 2 and 3 are the **member
+count, little-endian**: `1F 0F` = 3,871 (the reference archive's count) and
+`0C 00` = 12 (`small.cbv`'s count). The header is therefore matched
+*structurally* — `08 00`, count, `AD 00 03 00` — and the count it states is
+checked against the count the first record's pool offset implies. Two
+independent statements of the same fact that disagree mean the file is not the
+archive it claims to be, which is the cheapest way to notice a mis-deciphered
+or damaged container.
+
+### The password check
+
+DES carries no integrity of its own, so the container's own header is the
+check: a password is right when the deciphered first block is shaped like a
+header. That is what `Error::WrongPassword` reports, and it costs **one
+eight-byte read** — a 1.7 GB protected archive is never deciphered to find out
+whether the password was right, nor to list its members, nor to extract one.
+
+Because an ECB block depends only on itself, ranges are deciphered on demand
+rather than the file being deciphered whole: reading a member aligns down to a
+block boundary, deciphers that window, and slices. Extraction holds one member
+at a time.
+
+### Open: passwords that are not eight bytes
+
+The oracle's behaviour for a password whose length is not exactly eight is
+**internally inconsistent**, and is deliberately not reproduced:
+
+- seven bytes → it panics (`index out of bounds: the len is 8 but the index is 8`);
+- nine or more → it deciphers under a key that is **not** the first eight bytes,
+  and the rule was not identified. Tested and rejected against the oracle's own
+  output: first-8, last-8, cyclic, reversed, XOR-fold, sum-fold, bytes 8..16,
+  all 8! position permutations, whole-byte transforms (NOT, XOR-FF, add/sub 1,
+  bit-reverse, nibble-swap, case), double-DES, and MD5/SHA-1/SHA-256 of the
+  password with and without a trailing newline;
+- `password22` and `password33` produce **byte-identical** output, while
+  `passwordAA`, `passwordAB`, `password99`, `password11` and `passworda1` —
+  same length, same eight-byte prefix — each produce their own.
+
+A scheme with an unexplained collision is a reason to distrust that path, not a
+finding about the format. This reader uses the first eight bytes, zero-padded
+for a shorter password, and says so. **Whether real ChessBase agrees for
+passwords longer than eight bytes is open**, and no sample that settles it was
+found.
 
 ## Open and unknown — the list
 
@@ -336,9 +387,8 @@ Everything below is unresolved. None of it is guessed at in the code.
 | 5 | The purpose of the excerpt | its content position is not recorded, and 35–105 bytes cannot expose a block header | as above |
 | 6 | The meaning of the 9-byte segment | 26 values, no invariant beyond three fixed bytes | nothing — the reader does not use it |
 | 7 | The nine stored records whose stream length disagrees with their `size` | the local copies were rewritten from 61,440 on; which side is authoritative is not established | extracting those eight members |
-| 8 | The `.cbz` key derivation | no sample exists | `.cbz` at all |
-| 9 | The `.cbz` chaining mode | no sample exists | `.cbz` at all |
-| 10 | The `.cbz` password check | no sample exists; DES has no integrity of its own | `WrongPassword` |
+| 8 | The `.cbz` key rule for passwords **longer than eight bytes** | the oracle is self-inconsistent here (see above) | `.cbz` with a long password |
+| 9 | Whether real ChessBase agrees with the first-eight-bytes rule for long passwords | no second sample with a known plaintext | `.cbz` with a long password |
 | 11 | Whether the 173-byte stride and 128-byte name field hold for other archives | verified on one archive | reading a differently-built `.cbv` |
 
 Item 11 is worth stating plainly: the reader *derives* the member count from

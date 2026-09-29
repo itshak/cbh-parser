@@ -20,11 +20,36 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::archive::hex;
 use crate::error::Error;
 use crate::file::DbFile;
 
 /// The magic at the start of a `.cbv` (and of a decrypted `.cbz`).
 pub const MAGIC: [u8; 8] = [0x08, 0x00, 0x1F, 0x0F, 0xAD, 0x00, 0x03, 0x00];
+
+/// The two bytes every container header starts with.
+pub const HEADER_PREFIX: [u8; 2] = [0x08, 0x00];
+
+/// The four bytes every container header ends with.
+pub const HEADER_SUFFIX: [u8; 4] = [0xAD, 0x00, 0x03, 0x00];
+
+/// The member count a header claims, little-endian in bytes 2 and 3.
+///
+/// This was not obvious from one archive: the reference archive's header is
+/// `08 00 1F 0F AD 00 03 00` and `1F 0F` is 3,871 — its member count — while a
+/// twelve-member archive's header is `08 00 0C 00 AD 00 03 00` and `0C 00` is
+/// twelve. The middle two bytes are the count, not part of a constant, so the
+/// header is matched structurally rather than byte for byte.
+pub fn header_count(path: &Path, header: &[u8; 8]) -> Result<u16, Error> {
+    if header[..2] != HEADER_PREFIX || header[4..] != HEADER_SUFFIX {
+        return Err(Error::corrupt(
+            path,
+            0,
+            format!("bad header {} - expected {}.., count, {}", hex(header), hex(&HEADER_PREFIX), hex(&HEADER_SUFFIX)),
+        ));
+    }
+    Ok(u16::from_le_bytes([header[2], header[3]]))
+}
 
 /// Where the member table starts, right behind the magic.
 pub const DIRECTORY_OFFSET: u64 = 8;
@@ -209,14 +234,23 @@ pub(crate) fn record_count(path: &Path, first: &[u8], file_len: u64) -> Result<u
 }
 
 /// Parses the member table of `file`, whose magic has already been checked.
-/// `count` records are read from [`DIRECTORY_OFFSET`].
-pub(crate) fn read_table(file: &DbFile, count: u64) -> Result<Vec<Member>, Error> {
+/// `count` records are read from [`DIRECTORY_OFFSET`], each through `read`.
+///
+/// A `.cbz` needs the reader to be a parameter: the table is enciphered like
+/// the rest of the file, so the caller supplies one that deciphers. An
+/// unencrypted archive passes the plain read, and costs the same either way.
+pub(crate) fn read_table_with(
+    file: &DbFile,
+    count: u64,
+    mut read: impl FnMut(u64, usize) -> Result<Vec<u8>, crate::error::Error>,
+) -> Result<Vec<Member>, Error> {
     let path = file.path();
+    let file_len = file.len()?;
     let mut members = Vec::with_capacity(usize::try_from(count).unwrap_or(0));
     for index in 0..count {
         let at = DIRECTORY_OFFSET + index * ENTRY_SIZE;
-        let record = file.read(at, ENTRY_SIZE as usize)?;
-        members.push(parse_record(path, index as usize, &record, file.len()?)?);
+        let record = read(at, ENTRY_SIZE as usize)?;
+        members.push(parse_record(path, index as usize, &record, file_len)?);
     }
     Ok(members)
 }

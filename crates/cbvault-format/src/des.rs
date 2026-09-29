@@ -1,47 +1,41 @@
-//! The `.cbz` password-protected container: DES and what is still missing.
+//! The `.cbz` password-protected container: DES, and the scheme above it.
 //!
 //! # What is established
 //!
-//! A `.cbz` is a `.cbv` whose bytes are enciphered; the change plan and the
-//! requirement in `openspec/specs/cbvault/spec.md` both name a legacy DES
-//! scheme, and the crate's [`crate::error::Error::WrongPassword`] exists for it.
+//! A `.cbz` is a `.cbv` whose every byte is enciphered with **DES in ECB**,
+//! under a key that is **the password's first eight bytes**. There is no
+//! plaintext header, no salt and no IV — the container's own header is
+//! enciphered like everything else, which is what makes the header the
+//! password check.
+//!
+//! This is an observation, not an inference. `vendor/oracles/uncbv/tests/`
+//! carries `small.cbz` beside its plaintext `decrypted_small.cbv`; the scheme
+//! was determined against that pair and reproduces **all 3,000 bytes** of it.
+//! The evidence is written up in `docs/format-spec-cbv.md` and the change's
+//! `design.md`; the oracle's source was never read, only its output used.
 //!
 //! # What is open
 //!
-//! **No `.cbz` sample exists on the machines this crate was built on.** The
-//! facts pass searched `~/Documents/ChessBase` and `~/Documents` and found none
-//! (`docs/research/00-cbv-facts.md`). With no file to inspect, three things are
-//! unverifiable, and none of them is guessed at here:
+//! The key rule for a password that is **not** exactly eight bytes long. This
+//! reader takes the first eight and zero-pads a shorter one. The reference
+//! extractor behaves inconsistently there — it panics below eight bytes and
+//! deciphers under an unidentified key above them — and that path was not
+//! copied. See the design note for the hypotheses that were tested and
+//! rejected.
 //!
-//! 1. **How a password becomes a DES key.** The derivation — padding, salt,
-//!    iteration count, whether the key is the password's first eight bytes or a
-//!    digest of it — cannot be observed without a sample.
-//! 2. **The cipher's mode and chaining.** Whether the container is DES in ECB
-//!    over 8-byte blocks, or in CBC with a stored IV, or a chained variant, is
-//!    not observable without a sample.
-//! 3. **How a wrong password is detected.** DES carries no integrity check, so
-//!    the container must hold one; its form is unknown. This is why
-//!    [`crate::error::Error::WrongPassword`] cannot yet be produced honestly.
+//! # Decrypting on demand
 //!
-//! What *is* implemented is the part that is publicly documented and testable on
-//! its own: the DES block cipher, which is FIPS 46-3 and therefore has published
-//! test vectors. [`Des`] is checked against those vectors in the tests below, so
-//! the primitive is known good; only the container framing above it is missing.
-//!
-//! Filling the gap in is a matter of implementing [`KeyDerivation`] for the
-//! legacy scheme, naming the chaining mode, and adding the container's own
-//! password check. [`open`] reports a typed error naming those three open points
-//! until then, so a caller can never mistake a `.cbz` for something this reader
-//! understood.
-//!
-//! A real-sample test is gated on the `CBH_TEST_CBZ` environment variable and
-//! **fails loudly** when a sample is present, so the gate can never pass
-//! silently.
+//! An ECB block depends only on itself, so a range can be deciphered without
+//! touching the rest of the file. [`verify_password`] reads one eight-byte
+//! block; [`decrypt_range`] deciphers an aligned window. That is why opening a
+//! 1.7 GB protected archive costs eight bytes, and why extraction holds one
+//! member rather than the whole file.
 
 use std::fmt;
 use std::path::{Path, PathBuf};
 
 use crate::error::Error;
+use crate::file::DbFile;
 
 /// A DES key: eight bytes, with FIPS 46-3 parity in the low bit of each byte.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -259,6 +253,84 @@ pub trait KeyDerivation {
 /// passing quietly.
 pub const SAMPLE_ENV: &str = "CBH_TEST_CBZ";
 
+/// The key a password produces: its first eight bytes, zero-padded.
+///
+/// This is the rule established in `docs/format-spec-cbv.md` and verified
+/// byte-exact over a whole sample. How the reference extractor behaves for a
+/// password that is *not* exactly eight bytes long is unexplained and is
+/// deliberately not reproduced; see the change's `design.md`.
+pub fn key_from_password(password: &str) -> Key {
+    let mut bytes = [0u8; 8];
+    for (slot, b) in bytes.iter_mut().zip(password.as_bytes()) {
+        *slot = *b;
+    }
+    Key::new(bytes)
+}
+
+/// A container header as it stands once deciphered, with the member count
+/// `count` written into bytes 2 and 3.
+///
+/// A `.cbz` enciphers its header like everything else, so this is what a
+/// password is checked against without reading the rest of the archive. The
+/// count is a parameter rather than a constant because it is one: the header of
+/// an archive of `n` members differs from that of any other.
+pub fn magic_plaintext(count: u16) -> [u8; 8] {
+    let mut header = [0x08, 0x00, 0, 0, 0xAD, 0x00, 0x03, 0x00];
+    header[2..4].copy_from_slice(&count.to_le_bytes());
+    header
+}
+
+/// The count-free part of a deciphered container header: the two bytes it
+/// starts with and the four it ends with. A password is right when the
+/// deciphered first block matches this shape — the middle two bytes are the
+/// member count and so cannot be compared against a fixed value.
+pub const HEADER_SHAPE: ([u8; 2], [u8; 4]) = ([0x08, 0x00], [0xAD, 0x00, 0x03, 0x00]);
+
+/// Whether a deciphered block is shaped like a container header.
+fn looks_like_a_container(header: &[u8]) -> bool {
+    let (prefix, suffix) = HEADER_SHAPE;
+    header.len() >= 8 && header[..2] == prefix && header[4..8] == suffix
+}
+
+/// The smallest head whose deciphering settles whether a password is right.
+const VERIFY: usize = 8;
+
+/// Deciphers `data` in place. An ECB block depends only on itself, so any
+/// whole number of blocks can be deciphered on its own.
+fn decrypt_ecb(des: &Des, data: &mut [u8]) {
+    for block in data.as_chunks_mut::<8>().0 {
+        let cipher = *block;
+        block.copy_from_slice(&des.decrypt_block(cipher));
+    }
+}
+
+/// Reports whether `password` deciphers `path` into something that starts like
+/// a container, reading only the first block.
+///
+/// This is what makes opening a protected archive cheap: eight bytes settle the
+/// password and nothing else in the file is touched.
+pub fn verify_password(path: &Path, password: &str) -> Result<bool, Error> {
+    let file = DbFile::open(path.to_path_buf())?;
+    if file.len()? < VERIFY as u64 {
+        return Ok(false);
+    }
+    let mut head = file.read(0, VERIFY)?;
+    decrypt_ecb(&Des::new(key_from_password(password)), &mut head);
+    Ok(looks_like_a_container(&head))
+}
+
+/// Deciphers `data`, which begins `within` bytes into an eight-byte block.
+///
+/// ECB is what makes this possible: block *n* depends only on itself, so a
+/// range at an arbitrary offset can be read, deciphered and sliced without
+/// touching the rest of the file. That is why a protected archive never has to
+/// be deciphered whole.
+pub fn decrypt_range(des: &Des, data: &[u8], within: usize) -> Vec<u8> {
+    let mut buf = data.to_vec();
+    decrypt_ecb(des, &mut buf);
+    buf[within..].to_vec()
+}
+
 /// The `.cbz` sample this machine has, or `None` when there is none.
 pub fn sample() -> Option<PathBuf> {
     let path = std::env::var_os(SAMPLE_ENV).map(PathBuf::from)?;
@@ -278,15 +350,21 @@ pub fn sample() -> Option<PathBuf> {
 /// panic. Guessing a derivation here would produce a reader that hands back
 /// confident garbage.
 pub fn open(path: &Path, password: &str) -> Result<Vec<u8>, Error> {
-    // Nothing below guesses. Naming the open points in the error is more useful
-    // to a caller than a stack of made-up bytes.
-    let _ = (path, password);
-    Err(Error::corrupt(
-        path,
+    let file = DbFile::open(path.to_path_buf())?;
+    let len = file.len()?;
+    if len < VERIFY as u64 {
+        return Err(Error::corrupt(path, 0, format!("a {len}-byte file cannot hold a container magic")));
+    }
+    let mut data = file.read(
         0,
-        "a .cbz cannot be opened yet: the DES key derivation, the chaining mode and the password check are unverified \
-         (no .cbz sample exists on this machine; see docs/format-spec-cbv.md)",
-    ))
+        usize::try_from(len)
+            .map_err(|_| Error::corrupt(path, 0, format!("a {len}-byte file is too large to decipher in one piece")))?,
+    )?;
+    decrypt_ecb(&Des::new(key_from_password(password)), &mut data);
+    if !looks_like_a_container(&data) {
+        return Err(Error::WrongPassword { path: path.to_path_buf() });
+    }
+    Ok(data)
 }
 
 #[cfg(test)]
@@ -342,29 +420,95 @@ mod tests {
         assert_eq!(Key::new([0; 8]).bytes(), [0; 8]);
     }
 
+    /// The established key rule, stated as a test so a future change to it has
+    /// to argue with this rather than drift.
     #[test]
-    fn opening_a_cbz_reports_the_open_points_rather_than_guessing() {
-        let path = std::env::temp_dir().join("nothing-here.cbz");
-        let e = open(&path, "secret").unwrap_err();
-        assert!(matches!(e, Error::Corrupt { .. }), "{e:?}");
-        assert!(e.to_string().contains("key derivation"), "{e}");
-        assert!(e.to_string().contains("no .cbz sample"), "{e}");
+    fn a_key_is_the_passwords_first_eight_bytes() {
+        assert_eq!(key_from_password("password").bytes(), *b"password");
+        assert_eq!(key_from_password("passwordXX").bytes(), *b"password");
+        // a short password is zero-padded rather than refused
+        assert_eq!(key_from_password("short").bytes(), *b"short\0\0\0");
+        assert_eq!(key_from_password("").bytes(), [0u8; 8]);
+        // a multi-byte character is taken by its encoded bytes
+        assert_eq!(key_from_password("\u{e9}").bytes(), [0xC3, 0xA9, 0, 0, 0, 0, 0, 0]);
     }
 
-    /// The real-sample gate. With a sample present this **fails**: the scheme is
-    /// unimplemented, and a test that passed here would be claiming otherwise.
+    /// ECB: a block deciphers on its own, and a range at an arbitrary offset
+    /// deciphers correctly once the unaligned head is sliced off.
     #[test]
-    fn the_cbz_sample_gate_reports_rather_than_passes() {
+    fn a_range_deciphers_at_any_offset() {
+        let des = Des::new(key_from_password("password"));
+        let plain: Vec<u8> = (0..64u8).collect();
+        let mut cipher = plain.clone();
+        for block in cipher.as_chunks_mut::<8>().0 {
+            let p = *block;
+            block.copy_from_slice(&des.encrypt_block(p));
+        }
+        // The contract: `data` starts on a block boundary and `within` says how
+        // far into that first block the caller wants. This is exactly what the
+        // archive reader does when a member's stream is at an odd offset.
+        for (at, len) in [(0usize, 64), (8, 32), (16, 16), (56, 8)] {
+            let got = decrypt_range(&des, &cipher[at..at + len], 0);
+            assert_eq!(got, plain[at..at + len], "offset {at}, length {len}");
+        }
+        for (at, len) in [(3usize, 40), (1, 63), (7, 1), (17, 9), (63, 1)] {
+            let start = at & !7;
+            let within = at - start;
+            let end = (at + len + 7) & !7;
+            let got = decrypt_range(&des, &cipher[start..end], within);
+            assert_eq!(&got[..len], &plain[at..at + len], "offset {at}, length {len}");
+        }
+    }
+
+    /// A whole container, enciphered the way a `.cbz` is, comes back.
+    #[test]
+    fn a_container_deciphers_and_the_password_is_checked_against_its_magic() {
+        let dir = std::env::temp_dir().join("cbvault-des-tests");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("round.cbz");
+        // a real container head, then filler
+        let mut plain = magic_plaintext(12).to_vec();
+        plain.extend((0..192u32).map(|i| (i % 251) as u8));
+        let des = Des::new(key_from_password("password"));
+        let mut cipher = plain.clone();
+        for block in cipher.as_chunks_mut::<8>().0 {
+            let p = *block;
+            block.copy_from_slice(&des.encrypt_block(p));
+        }
+        std::fs::write(&path, &cipher).unwrap();
+
+        assert!(verify_password(&path, "password").unwrap());
+        assert!(!verify_password(&path, "wrongpwd").unwrap());
+        // a password of the wrong length is a wrong password, not a crash
+        assert!(!verify_password(&path, "passwor").unwrap());
+        assert!(!verify_password(&path, "").unwrap());
+
+        // the right password reproduces the container exactly
+        assert_eq!(open(&path, "password").expect("the right password opens it"), plain);
+
+        // the wrong one is a wrong password, named as such - not corruption
+        let e = open(&path, "not-the-password").unwrap_err();
+        assert!(matches!(e, Error::WrongPassword { .. }), "{e:?}");
+        assert_eq!(e.to_string(), format!("{}: wrong password", path.display()));
+        std::fs::remove_file(&path).ok();
+    }
+
+    /// The differential test against a real `.cbz`, opt-in via `CBH_TEST_CBZ`.
+    ///
+    /// With a sample present this is a real assertion, not a placeholder: the
+    /// password comes from `CBH_TEST_CBZ_PASSWORD`, and the deciphered file must
+    /// begin with a container magic.
+    #[test]
+    fn the_cbz_sample_gate_decrypts_a_real_sample() {
         let Some(path) = sample() else {
             eprintln!("{SAMPLE_ENV} is not set and no .cbz sample is present: skipping");
             return;
         };
-        eprintln!("{SAMPLE_ENV} names {}: the .cbz scheme is unimplemented, so this cannot pass", path.display());
-        let e = open(&path, "wrong password").unwrap_err();
-        assert!(matches!(e, Error::Corrupt { .. }), "expected the open-point error, got {e:?}");
-        panic!(
-            "{} is present but the .cbz key derivation, chaining and password check are unimplemented",
-            path.display()
-        );
+        let password =
+            std::env::var("CBH_TEST_CBZ_PASSWORD").expect("CBH_TEST_CBZ_PASSWORD must accompany CBH_TEST_CBZ");
+        assert!(verify_password(&path, &password).unwrap(), "{} should open with the password given", path.display());
+        let plain = open(&path, &password).expect("the sample decrypts");
+        assert!(looks_like_a_container(&plain), "the deciphered sample is a container");
+        eprintln!("{}: {} bytes deciphered and recognised", path.display(), plain.len());
     }
 }

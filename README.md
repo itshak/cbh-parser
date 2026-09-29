@@ -87,7 +87,7 @@
 | PGN export | **read** | sequential and parallel, byte-identical output |
 | `.cbv` container | **read** | table parsed and validated for every member |
 | `.cbv` extraction, modes 1/2/3 | **not decoded** | mode `0x00` (57.6 %) decodes exactly |
-| `.cbz` | **not implemented** | no sample has ever existed; DES key derivation deliberately unverified |
+| `.cbz` | **read** | DES-ECB, key = the password's first eight bytes; verified byte-exact over a 3,000-byte sample. Passwords not exactly eight bytes are an open question |
 | 2CBH container | **read** | framing proven over 220,418 records |
 | 2CBH `.2cbg` move codec | **not decoded** | yields tags, not `moves2` |
 | Boosters, derived accelerators | **not read** | tolerated and ignored, by design |
@@ -454,26 +454,45 @@ content is not recorded anywhere the reader can see, so it cannot be used to ali
 a stream against its plaintext. The remaining seam is one trait — `Codec` — and
 implementing a mode needs no change to `Archive` or to extraction.
 
-### `.cbz` is not implemented, and is not guessed at
+### `.cbz` is read, and the scheme is known
 
-**No `.cbz` sample has ever existed on the machine this was built on.** Three
-things are therefore unverifiable and are deliberately left unimplemented rather
-than invented:
+A `.cbz` is a `.cbv` whose every byte is enciphered with **DES in ECB**, under a
+key that is **the password's first eight bytes**. There is no plaintext header,
+no salt and no IV: the container's own header is enciphered like everything
+else.
 
-1. **How a password becomes a DES key** — padding, salt, iteration count, whether
-   it is the password's first eight bytes or a digest of it.
-2. **The cipher's chaining mode** — ECB over 8-byte blocks, CBC with a stored IV,
-   or a chained variant.
-3. **How a wrong password is detected** — DES carries no integrity check of its
-   own, so the container must hold one, and its form is unknown.
+That is an observation rather than an inference. The oracle's fixture directory
+carries `small.cbz` beside its plaintext `decrypted_small.cbv`, and the scheme
+was determined against that pair — it reproduces **all 3,000 bytes** of it, the
+archive then lists its 12 members, and `small.cbh` decodes to exactly the bytes
+the oracle extracted. The oracle's source was never read; its binary was run and
+its output compared.
 
-The DES block cipher itself *is* implemented and verified against the FIPS 46-3
-published test vectors, because a published standard with published vectors can be
-proved correct without a sample. `des::KeyDerivation` is a trait with **no
-implementation**. `open` reports a typed error naming the three open points, so a
-caller can never mistake a `.cbz` for something this reader understood. The
-sample-gated test **fails loudly** when a sample is present, so the gate can never
-pass silently.
+The container's header is therefore also the password check: a password is
+right when the deciphered first block is shaped like a header. That costs **one
+eight-byte read** — opening a 1.7 GB protected archive never deciphers the file
+to find out, and neither does listing it or extracting a single member. An ECB
+block depends only on itself, so each member is deciphered as it is read and
+extraction holds one member at a time.
+
+```console
+$ cbvault archive list Mega.cbz --password 'my password'
+$ cbvault archive extract Mega.cbz ./out --password 'my password'
+```
+
+A wrong password reports `wrong password`. It is not reported as a corrupt
+archive, because the file is not corrupt: it is a well-formed container under a
+key the caller did not supply.
+
+**One thing is still open.** The key rule for a password that is not exactly
+eight bytes long. This reader takes the first eight and zero-pads a shorter one.
+The reference extractor is self-inconsistent there — it panics below eight
+bytes, and above them deciphers under a key that could not be identified, with
+`password22` and `password33` producing byte-identical output while
+`passwordAA`, `passwordAB`, `password99` and `password11` each differ. Rather
+than copy an unexplained path, the eight-byte rule that *is* verified over a
+whole sample is what ships. `docs/format-spec-cbv.md` lists every hypothesis
+that was tested and rejected.
 
 ```
 

@@ -16,8 +16,8 @@ const USAGE: &str = "usage:
   cbvault info   <db> [--games N] [--json]
   cbvault verify <db> [--threads N] [--batch-size N] [--limit-failures N] [--json]
   cbvault pgn    <db> [out] [--from ID] [--to ID] [--threads N] [--batch-size N] [--json]
-  cbvault archive list <archive> [--json]
-  cbvault archive extract <archive> <dir> [--only NAME] [--json]
+  cbvault archive list <archive> [--json] [--password P]
+  cbvault archive extract <archive> <dir> [--only NAME] [--json] [--password P]
 
 The PGN goes to `out`, or to stdout when no path is given, so it can be piped.
 The export report always goes to stderr, so stdout stays pure PGN.
@@ -200,18 +200,31 @@ fn run_verify(mut args: impl Iterator<Item = String>) -> Result<bool, Box<dyn st
 /// decoding, so listing a 1.7 GB archive is a table read and never touches the
 /// data pool. That is worth stating, because it is the property that makes listing
 /// usable on a database far larger than memory.
+/// Opens an archive, with a password when one was given.
+///
+/// The two cases are the same call to the caller: a `.cbv` opens plainly and a
+/// `.cbz` opens under its key, and the difference is entirely in the file.
+fn open_archive(path: &str, password: Option<&str>) -> Result<Archive, Box<dyn std::error::Error>> {
+    Ok(match password {
+        Some(p) => Archive::open_with_password(path, p)?,
+        None => Archive::open(path)?,
+    })
+}
+
 fn run_archive_list(mut args: impl Iterator<Item = String>) -> Result<bool, Box<dyn std::error::Error>> {
     let mut path: Option<String> = None;
+    let mut password: Option<String> = None;
     let mut json = false;
-    for arg in args.by_ref() {
+    while let Some(arg) = args.next() {
         match arg.as_str() {
             "--json" => json = true,
+            "--password" => password = Some(args.next().ok_or("--password requires a value")?),
             other if !other.starts_with('-') && path.is_none() => path = Some(other.to_string()),
             _ => return Err(USAGE.into()),
         }
     }
     let path = path.ok_or(USAGE)?;
-    let archive = Archive::open(&path)?;
+    let archive = open_archive(&path, password.as_deref())?;
 
     if json {
         let members: Vec<String> = archive
@@ -282,10 +295,12 @@ fn run_archive_extract(mut args: impl Iterator<Item = String>) -> Result<bool, B
     let mut path: Option<String> = None;
     let mut dir: Option<String> = None;
     let mut only: Option<String> = None;
+    let mut password: Option<String> = None;
     let mut json = false;
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--only" => only = Some(args.next().ok_or("--only requires a member name")?),
+            "--password" => password = Some(args.next().ok_or("--password requires a value")?),
             "--json" => json = true,
             other if !other.starts_with('-') => {
                 if path.is_none() {
@@ -300,7 +315,7 @@ fn run_archive_extract(mut args: impl Iterator<Item = String>) -> Result<bool, B
         }
     }
     let (path, dir) = (path.ok_or(USAGE)?, dir.ok_or(USAGE)?);
-    let archive = Archive::open(&path)?;
+    let archive = open_archive(&path, password.as_deref())?;
     let dir = std::path::Path::new(&dir);
 
     let wanted: Vec<&Member> = match &only {

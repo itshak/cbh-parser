@@ -38,6 +38,7 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
+use crate::des::Des;
 use crate::error::Error as FormatError;
 use crate::file::DbFile;
 
@@ -51,6 +52,32 @@ pub use codec::{Codec, Head, Mode, Stored, codec_for, codecs};
 pub use entry::{DIRECTORY_OFFSET, ENTRY_SIZE, MAGIC, Member};
 pub use error::{Error, Result};
 pub use report::{Gap, Layout};
+/// Reads `len` bytes at `offset`, deciphering them when the archive is
+/// password-protected.
+///
+/// The read is aligned down to a whole eight-byte block, because an ECB block
+/// is deciphered as a unit; the unaligned remainder is sliced off afterwards.
+/// This is what keeps a protected archive cheap: the caller reads only the
+/// ranges it needs and only those are deciphered.
+fn read_through(
+    file: &DbFile,
+    cipher: Option<&Des>,
+    offset: u64,
+    len: usize,
+) -> std::result::Result<Vec<u8>, FormatError> {
+    let Some(des) = cipher else {
+        return file.read(offset, len);
+    };
+    let start = offset & !7;
+    let within = usize::try_from(offset - start).expect("the difference of two u64s below usize fits on this platform");
+    let end = offset + len as u64;
+    let aligned_end = (end + 7) & !7;
+    let raw = file.read(start, usize::try_from(aligned_end - start).unwrap_or(usize::MAX))?;
+    let mut buf = crate::des::decrypt_range(des, &raw, within);
+    buf.truncate(len);
+    Ok(buf)
+}
+
 /// A `.cbv` archive, opened and parsed but not yet extracted.
 ///
 /// Opening validates the magic and every member-table record; it does not read
@@ -62,6 +89,7 @@ pub struct Archive {
     file: DbFile,
     members: Vec<Member>,
     file_len: u64,
+    cipher: Option<Des>,
 }
 
 impl Archive {
@@ -75,7 +103,15 @@ impl Archive {
     /// does not account for itself. Damaged input never panics: every length,
     /// offset and name in the table is bounds-checked before it is used.
     pub fn open(path: impl AsRef<Path>) -> Result<Archive> {
-        let path = path.as_ref().to_path_buf();
+        Self::open_inner(path.as_ref().to_path_buf(), None)
+    }
+
+    /// The shared open, carrying the key when the archive is protected.
+    ///
+    /// Every read — the magic, the first record, and each member stream — goes
+    /// through [`read_through`], so a protected archive is deciphered exactly
+    /// where it is looked at and nowhere else.
+    fn open_inner(path: PathBuf, cipher: Option<Des>) -> Result<Archive> {
         let file = DbFile::open(path.clone())?;
         let file_len = file.len()?;
         if file_len < DIRECTORY_OFFSET + ENTRY_SIZE {
@@ -86,16 +122,28 @@ impl Archive {
             )
             .into());
         }
-        let magic = file.read(0, MAGIC.len())?;
-        if magic != MAGIC {
-            return Err(FormatError::corrupt(&path, 0, format!("bad magic {}", hex(&magic))).into());
-        }
+        let header: [u8; 8] = read_through(&file, cipher.as_ref(), 0, MAGIC.len())?
+            .try_into()
+            .map_err(|_| FormatError::corrupt(&path, 0, "a header shorter than eight bytes"))?;
+        let declared = entry::header_count(&path, &header)?;
 
         // The first record is read on its own: its offset says where the pool
         // begins, and that is what says how many records the table holds.
-        let first = file.read(DIRECTORY_OFFSET, ENTRY_SIZE as usize)?;
+        let first = read_through(&file, cipher.as_ref(), DIRECTORY_OFFSET, ENTRY_SIZE as usize)?;
         let count = entry::record_count(&path, &first, file_len)?;
-        let members = entry::read_table(&file, count)?;
+        // Two independent statements of the member count must agree: the header
+        // carries one, and the first record's pool offset implies the other. A
+        // disagreement means the file is not the archive it claims to be, and
+        // is the cheapest way to notice a mis-deciphered or damaged container.
+        if u64::from(declared) != count {
+            return Err(FormatError::corrupt(
+                &path,
+                0,
+                format!("the header says {declared} members, but the table holds {count}"),
+            )
+            .into());
+        }
+        let members = entry::read_table_with(&file, count, |at, len| read_through(&file, cipher.as_ref(), at, len))?;
         // The pool is stored in table order; a record that starts before its
         // predecessor ends is not a pool this reader can trust.
         for pair in members.windows(2) {
@@ -115,7 +163,35 @@ impl Archive {
                 .into());
             }
         }
-        Ok(Archive { path, file, members, file_len })
+        Ok(Archive { path, file, members, file_len, cipher })
+    }
+
+    /// Opens a password-protected `.cbz`, with `password`.
+    ///
+    /// The password is settled against the container's own magic, which costs
+    /// one eight-byte read: the rest of the file is not deciphered to open it,
+    /// and is not deciphered at all until a member is read. Members are
+    /// deciphered as they are read, so extraction holds one member at a time
+    /// rather than the whole archive.
+    ///
+    /// # Errors
+    ///
+    /// Reports [`crate::error::Error::WrongPassword`] when `password` does not
+    /// decipher the file into a container. A wrong password is not corruption
+    /// and is not reported as such. Every other failure — a short file, a bad
+    /// magic, a member record that does not account for itself — is reported
+    /// as it would be for an unencrypted archive.
+    pub fn open_with_password(path: impl AsRef<Path>, password: &str) -> Result<Archive> {
+        let path = path.as_ref().to_path_buf();
+        if !crate::des::verify_password(&path, password)? {
+            return Err(crate::error::Error::WrongPassword { path }.into());
+        }
+        Archive::open_inner(path, Some(Des::new(crate::des::key_from_password(password))))
+    }
+
+    /// Whether this archive is password-protected.
+    pub fn is_encrypted(&self) -> bool {
+        self.cipher.is_some()
     }
 
     /// The archive's path, for diagnostics.
@@ -186,7 +262,7 @@ impl Archive {
                 format!("'{}' claims a {}-byte stream", member.name(), member.packed()),
             )
         })?;
-        Ok(self.file.read(member.offset(), len)?)
+        read_through(&self.file, self.cipher.as_ref(), member.offset(), len).map_err(Into::into)
     }
 
     /// Decodes `member` with the first registered codec that handles its mode.
@@ -213,7 +289,7 @@ impl Archive {
 
     /// Whether this build can decode `member`, reading only its stream head.
     pub fn can_decode(&self, member: &Member) -> Result<bool> {
-        let head = self.file.read(member.offset(), codec::HEAD)?;
+        let head = read_through(&self.file, self.cipher.as_ref(), member.offset(), codec::HEAD)?;
         Ok(Head::parse(&self.path, &head).is_ok_and(|h| codec_for(h.mode()).is_some()))
     }
 
@@ -263,7 +339,7 @@ impl Archive {
 }
 
 /// The bytes of `bytes` as uppercase hex pairs, for a bad-magic message.
-fn hex(bytes: &[u8]) -> String {
+pub(crate) fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02X}")).collect::<Vec<_>>().join(" ")
 }
 

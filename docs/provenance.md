@@ -106,7 +106,7 @@ State: `planned` until the porting task lands; then `ported`/`ported (chess swap
 | `cbvault-format::cbh::flags` (`.flags`) | Original (task 2.2): layout and the Top Games bits established from the local Mega Database 2025 (facts in `SPEC.md` §2.4 and the real-database report); the ancestor lists `.flags` but reads it nowhere |
 | `cbvault-format::cbh::textblocks` (`.cbl`) and `cbh::texttable` (`.cbtt`) | Original (task 2.3): record framing from our inspection of the local Mega 2025; the ancestor reads neither; `.cbtt`'s record content stays unverified (`SPEC.md` unknowns) |
 | `cbvault-format::cbh::entities` reading of `.cbe` (teams) | The file uses the ancestor's entity-file framing; reading it as the teams namebase is ours (task 2.3) |
-| `cbvault-format` — archive reader (`.cbv`, `.cbz`) | Clean-room per the protocol above; facts in `docs/research/00-cbv-facts.md` |
+| `cbvault-format` — archive reader (`.cbv`, `.cbz`) | Clean-room per the protocol above; facts in `docs/research/00-cbv-facts.md`. The `.cbz` scheme was established against a sample/plaintext pair in the oracle's fixtures (`small.cbz` / `decrypted_small.cbv`); the oracle's source was never opened |
 | `cbvault` — `Database`, `GameIter`, `decode_game_into`, archive façade | Task 6.1, 5.3 |
 | `cbvault::replay` — `verify_parallel`, Rayon chunk worker | Original (`fast-decode-and-parallel-replay`) |
 | `cbvault::pgn::parallel` — `export_parallel` / `export_range`, Rayon export pipeline | Original (`pgn-export-sota-performance`): modelled on our own `replay::verify_parallel`, byte-identical to the sequential writer by construction (id-ordered chunks, one `write_all` per chunk) |

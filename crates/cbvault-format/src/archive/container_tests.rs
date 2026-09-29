@@ -36,11 +36,23 @@ impl Fixture {
     }
 }
 
-/// Builds a whole `.cbv` in memory: the magic, one 173-byte record per fixture,
+/// A container header for an archive of `count` members.
+///
+/// The middle two bytes are the count, which is why a synthetic archive cannot
+/// reuse another archive's header: the reader holds the header's count against
+/// the one the table implies.
+fn header(count: usize) -> Vec<u8> {
+    let mut h = MAGIC;
+    let n = u16::try_from(count).expect("a synthetic archive fits a u16 count");
+    h[2..4].copy_from_slice(&n.to_le_bytes());
+    h.to_vec()
+}
+
+/// Builds a whole `.cbv` in memory: the header, one 173-byte record per fixture,
 /// and the pool.
 fn build(fixtures: &[Fixture]) -> Vec<u8> {
     let pool_start = (MAGIC.len() + fixtures.len() * ENTRY_SIZE as usize) as u64;
-    let mut out = MAGIC.to_vec();
+    let mut out = header(fixtures.len());
     let mut pool = Vec::new();
     for f in fixtures {
         let stream = f.stream();
@@ -263,14 +275,35 @@ fn a_name_that_would_escape_the_destination_is_refused() {
 // --- damage: every case below is a typed error or a clean open, never a panic.
 
 #[test]
-fn a_bad_magic_is_a_typed_error() {
+fn a_bad_header_is_a_typed_error() {
+    for (at, expected) in [(0usize, "08 00"), (4, "AD 00 03 00")] {
+        let mut bytes = build(&sample());
+        bytes[at] ^= 0xFF;
+        let path = temp("badheader", &bytes);
+        match Archive::open(&path) {
+            Err(Error::Format(e)) => {
+                assert!(matches!(e, crate::error::Error::Corrupt { .. }), "{e:?}");
+                assert!(e.to_string().contains("bad header"), "{e}");
+                assert!(e.to_string().contains(expected), "the message should state the expected header: {e}");
+            }
+            other => panic!("expected a corrupt-input error, got {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn a_header_whose_count_contradicts_the_table_is_rejected() {
+    // The header states a member count and the first record's pool offset
+    // implies another. Two independent statements that disagree mean the file is
+    // not the archive it claims to be, so the reader refuses rather than
+    // guessing which one to believe.
     let mut bytes = build(&sample());
-    bytes[0] = 0x09;
-    let path = temp("badmagic", &bytes);
+    bytes[2..4].copy_from_slice(&99u16.to_le_bytes());
+    let path = temp("countmismatch", &bytes);
     match Archive::open(&path) {
         Err(Error::Format(e)) => {
-            assert!(matches!(e, crate::error::Error::Corrupt { .. }), "{e:?}");
-            assert!(e.to_string().contains("bad magic"), "{e}");
+            assert!(e.to_string().contains("99 members"), "{e}");
+            assert!(e.to_string().contains("the table holds"), "{e}");
         }
         other => panic!("expected a corrupt-input error, got {other:?}"),
     }
@@ -369,4 +402,61 @@ fn a_table_off_the_record_grid_is_rejected() {
     let path = temp("unaligned", &bytes);
     let e = Archive::open(&path).unwrap_err();
     assert!(e.to_string().contains("whole number"), "{e}");
+}
+
+/// Enciphers a whole container the way a `.cbz` is written: DES-ECB over
+/// every block, with the header enciphered like everything else.
+fn encipher(plain: &[u8], password: &str) -> Vec<u8> {
+    let des = crate::des::Des::new(crate::des::key_from_password(password));
+    let mut out = plain.to_vec();
+    for block in out.as_chunks_mut::<8>().0 {
+        let p = *block;
+        block.copy_from_slice(&des.encrypt_block(p));
+    }
+    out
+}
+
+#[test]
+fn a_protected_archive_lists_and_decodes_exactly_as_a_plain_one() {
+    let fixtures = sample();
+    let plain = build(&fixtures);
+    let path = temp("protected", &encipher(&plain, "password"));
+
+    // the plain file is not readable as a container at all
+    assert!(Archive::open(&path).is_err(), "the enciphered file is not a bare .cbv");
+
+    let a = Archive::open_with_password(&path, "password").expect("the password opens it");
+    assert!(a.is_encrypted());
+    let b = Archive::open(temp("plain", &plain)).expect("the plain archive opens");
+    assert_eq!(a.list().len(), b.list().len());
+    for (x, y) in a.list().iter().zip(b.list()) {
+        assert_eq!(x.name(), y.name());
+        assert_eq!(x.packed(), y.packed());
+        assert_eq!(x.size(), y.size());
+    }
+    // and a member decodes to the same bytes either way
+    let member = a.find("db.cbh").expect("the fixture is named");
+    assert_eq!(a.decode(member).unwrap(), b.decode(b.find("db.cbh").unwrap()).unwrap());
+}
+
+#[test]
+fn a_wrong_password_is_a_wrong_password_not_a_corrupt_archive() {
+    let path = temp("protected-wrong", &encipher(&build(&sample()), "password"));
+    for wrong in ["wrongpwd", "passwor", "", "PASSWORD"] {
+        match Archive::open_with_password(&path, wrong) {
+            Err(Error::Format(crate::error::Error::WrongPassword { .. })) => {}
+            other => panic!("password {wrong:?} should be reported as wrong, got {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn a_password_protected_archive_is_never_written_to() {
+    let plain = build(&sample());
+    let path = temp("protected-ro", &encipher(&plain, "password"));
+    let before = std::fs::read(&path).unwrap();
+    let a = Archive::open_with_password(&path, "password").unwrap();
+    let _ = a.list();
+    let _ = a.decode(a.list().first().unwrap()).ok();
+    assert_eq!(std::fs::read(&path).unwrap(), before, "reading must not touch the archive");
 }
