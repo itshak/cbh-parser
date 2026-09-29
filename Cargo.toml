@@ -35,8 +35,3 @@ lto = "fat"
 codegen-units = 1
 panic = "abort"
 
-# `gigachess` 0.1.6 carries the SAN disambiguation change
-# (`turbochess-rs-san-disambiguation-direct`); the patch points at the sibling
-# checkout until the release reaches crates.io, and can be dropped after that.
-[patch.crates-io]
-gigachess = { path = "../turbochess-rs" }

@@ -67,6 +67,19 @@ caller that already made the move does not pay to make it again. Re-implementing
 the rule in this repository would have been a second chess implementation, and
 AGENTS.md forbids it.
 
+The same door carried the disambiguation (0.1.6, `itshak/gigachess-rs`): the
+ancestor reached the same qualifiers with a cheaper question — one make and one
+king-safety test per candidate instead of a full legal movegen — and a study on
+this repository's own database (0 differing moves over 13,908,447, the same gold
+result) turned that into an upstream change rather than a second
+implementation. Two things were needed for it to be *correct* rather than merely
+faster, and both are now upstream tests: the pre-filter is exact
+pseudo-legality, so only legality is left to ask about; and a candidate's
+legality is about the **mover's** king attacked by the side that moves next,
+both read from the caller's position — asking the other question reports a
+friendly defender on the king's own file as an attacker and drops hints the
+notation requires, which cost 324,013 gold games before it was caught.
+
 ## Consequences
 
 - The exporter now renders **correct minimal SAN** on the whole reference

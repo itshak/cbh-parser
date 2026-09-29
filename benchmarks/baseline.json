@@ -805,7 +805,7 @@
       },
       "in_crate_criterion": "cargo bench --bench micro, paired: san_48 per 48 renders -3.2 % on a busy middlegame, +1.9 % on an opening line where the branch almost never fires",
       "cbvault_criterion_fixture": "the export_100k fixture is 4-ply openings, where the branch never fires, so it shows the common path's code growth rather than the win: +2.5 to +3.4 % single and at 2-4 threads. Real games are the case the change is for.",
-      "dependency": "gigachess 0.1.6, with a `[patch.crates-io]` path to the sibling checkout until the release reaches crates.io",
+      "dependency": "gigachess 0.1.6 from crates.io; the registry copy of `src/san.rs` is byte-identical to the tagged commit 4428794, and the gates below are the ones run against the registry dependency",
       "wall_clock_alternating_a_b": {
         "method": "the whole 11,151,119-record export to /dev/null, one thread, gigachess 0.1.6 and 0.1.5 alternating with a rebuild between them, three runs each",
         "gigachess_0_1_6_seconds": [
@@ -818,6 +818,15 @@
           141.73
         ],
         "reading": "the first run of each 0.1.6 build pays for a cold binary and a cold page cache (168.52 s); in steady state the two are 134.2-135.3 s against 134.6-141.7 s. The box's run-to-run spread today is wider than the effect, so the wall clock does not resolve it and the per-ply measurement above is the number to trust: about 10 s of SAN work removed over 883,141,297 plies, with the export also bound by memory traffic, so the end-to-end share is smaller."
+      },
+      "gigachess_has_no_bug": "gigachess 0.1.5 asked the disambiguation with a full legal movegen of the position, which was correct and expensive: 0 differing moves against the per-candidate form over 13.9 M, and 407,350 of 419,385 against ChessBase. gigachess 0.1.6 keeps the same answers with the cheaper query (2.2 ns against 13.5 ns per SAN body), and this repository runs it from crates.io; the hunk's record is docs/gigachess-san-disambiguation.patch.",
+      "against_the_registry_release": {
+        "note": "the runs below are the crates.io 0.1.6 dependency, no local override, on a box carrying other tenants (load average ~9 on 10 cores), which is why they sit at the slow end of today's range",
+        "one_thread_seconds": 145.32,
+        "ten_threads_seconds": 19.5,
+        "ten_threads_records_per_second": 571924,
+        "pgn_bytes": 7683725549,
+        "gates_on_the_registry_release": "cargo fmt --check clean, cargo clippy --workspace --all-targets 0 warnings, cargo test --workspace 0 failures, gold 407,350 of 419,385 with 12,035 diffs in the same classes and 0 read errors, openspec validate --all --strict 2 passed"
       }
     }
   }

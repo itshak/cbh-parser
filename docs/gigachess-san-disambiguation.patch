@@ -1,6 +1,11 @@
 `move_to_san_body`: ask the disambiguation candidates directly instead of
 generating every legal move in the position
 
+LANDED: this is `gigachess` v0.1.6 (itshak/gigachess-rs, commit 4428794, OpenSpec
+change `turbochess-rs-san-disambiguation-direct`, archived). This file is the
+hunk's record, kept for the reasoning below; `cbh-parser` runs the release from
+crates.io and its registry copy of `src/san.rs` is byte-identical to that commit.
+
 gigachess 0.1.5, `src/san.rs`, in the branch that runs when a second piece of
 the same type attacks the destination square (`attackers_bb != 0`, 4.0 % of
 moves over the cbvault reference database):
