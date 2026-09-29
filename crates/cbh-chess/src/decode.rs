@@ -195,7 +195,15 @@ impl<S: MoveSink> Walker<'_, S> {
             // A pass is a move: gigachess flips the side, clears a pending
             // double push, and advances the clocks and the fullmove number.
             self.sink.play(&self.board, NULL_MOVE, self.main);
-            self.board.make_null_move().map_err(|_| self.fail("null move in check".into()))?;
+            let zob = self.sink.wants_zobrist();
+            let chk = self.sink.wants_checkers();
+            let res = match (zob, chk) {
+                (true, true) => self.board.make_null_move(),
+                (true, false) => self.board.make_null_move_hashed(),
+                (false, true) => self.board.make_null_move_checkered(),
+                (false, false) => self.board.make_null_move_fast(),
+            };
+            res.map_err(|_| self.fail("null move in check".into()))?;
         } else {
             let mv = Move::from_word(mv);
             self.sink.play(&self.board, mv.word(), self.main);
@@ -208,10 +216,11 @@ impl<S: MoveSink> Walker<'_, S> {
             // `play_fast` leaves stale. `+2 ns` per make buys one whole ply of
             // SAN work back; a sink that wants the fast make (the replay
             // verifier, which validates legality and nothing else) keeps it.
-            let res = if self.sink.wants_zobrist() || self.sink.wants_checkers() {
-                self.board.play(mv).map(|_| ())
-            } else {
-                self.board.play_fast(mv).map(|_| ())
+            let res = match (self.sink.wants_zobrist(), self.sink.wants_checkers()) {
+                (true, true) => self.board.play(mv).map(|_| ()),
+                (true, false) => self.board.play_hashed(mv).map(|_| ()),
+                (false, true) => self.board.play_checkered(mv).map(|_| ()),
+                (false, false) => self.board.play_fast(mv).map(|_| ()),
             };
             if res.is_err() {
                 return Err(self.fail(format!(

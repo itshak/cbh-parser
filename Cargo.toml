@@ -7,7 +7,7 @@ version = "0.1.0"
 edition = "2024"
 license = "MIT"
 rust-version = "1.88"
-repository = "https://github.com/itshak/cbh-parser"
+repository = "https://github.com/itshak/cbvault"
 
 [workspace.dependencies]
 gigachess = "0.1.6"
@@ -35,3 +35,6 @@ lto = "fat"
 codegen-units = 1
 panic = "abort"
 
+[patch.crates-io]
+# TEMPORARY (measurement of gigachess make variants) — removed after the run.
+gigachess = { path = "../turbochess-rs" }
