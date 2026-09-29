@@ -20,11 +20,19 @@ landed (it uses the new names).
 - [ ] 1.4 Keys in the same pass: `wants_keys` routes to the keyed walk; keys land in a caller-owned `Vec<u64>` cleared per game, never per ply. Verify: the indexed pass is within 15 % of the moves-only pass on the reference set, and a game's key sequence equals `replay_moves2_hashes` over the same `moves2` (the consumer's own primitive, as the oracle).
 - [ ] 1.5 Round-trip test with an in-memory target: convert N games, read them back, assert identical `moves2` blobs, tags and key sequences. This is the contract BlindBase implements against, so it ships as a documented example (`examples/convert.rs`) with the sink written the way the consumer should write it.
 
-## Phase 2 — Position search feed
+## Phase 2 — Search over a raw `.cbh`
 
-- [ ] 2.1 Unindexed replay search: `for_each_position_key(&Database, query_key, &mut hit_sink, &mut progress)` over the source with `play_fast`, parallel, with progress and cancel hooks. Verify: ≥ 15 M plies/s single-threaded on the reference set; a cancel stops within one chunk; the hit set equals a sidecar-backed search on a fixture where both are available.
-- [ ] 2.2 Propose `make_move_hashed` (incremental hash, no checkers cache) to gigachess with a before/after benchmark of the indexed conversion pass, and record the result here. If it measures at or under the ~2 ns/make that `checkers` costs, it ships as gigachess 0.1.7 and the conversion reclaims it; if not, the reason is recorded and the idea is closed. Verify: the conversion benchmark is re-run and `benchmarks/baseline.json` updated either way.
-- [ ] 2.3 Document the sidecar hand-off in `docs/bridge.md`: what the sink receives, how the consumer pairs keys with the ids it assigns, and when the manifest is stamped. Verify: a reader can implement the consumer side from the document alone.
+The measurement and the split are ADR-007: a tag search is a linear scan of a
+513 MB file of 46-byte records — **8 ms warm at 10 threads, 28 ms at one** — so
+it is answered here with predicate pushdown; position search is 883 M positions,
+which is either ~5 s unindexed or the consumer's sidecar, so it is fed.
+
+- [ ] 2.1 `Entities::find_player` / `find_tournament` / `find_annotator` / `find_source` — name to id by binary search of the `.cbe` sorted tree, the one genuinely new parsing work in the search path. Verify: a known name resolves to the id `Entities::player(id)` returns it for, on the reference set and on fixtures; an unknown name returns `None` without touching the moves file.
+- [ ] 2.2 `Database::scan_headers(range, filter, out)` — bulk 8,192-record reads, a predicate evaluated in the scan, Rayon across chunks, results emitted in game-number order, entity names resolved for the hits only. Verify: the result set is identical to a sequential scan; 11,151,119 records filtered in under 50 ms warm at 10 threads; the moves file is never opened.
+- [ ] 2.3 An id-set filter for name predicates: a 256-shard bitmap over entity ids the consumer fills from its own name matching, then filters on integers. Verify: a tournament-substring query over the reference set returns the same ids as a resolving scan.
+- [ ] 2.4 Unindexed position search: `for_each_position_key(&Database, query_key, &mut hit_sink, &mut progress)` with `play_fast`, parallel, with progress and cancel hooks. Verify: ≥ 15 M plies/s single-threaded; a cancel stops within one chunk; the hit set equals the sidecar-backed search on a fixture where both exist.
+- [ ] 2.5 Adopt the gigachess 0.1.7 make variants in the walker: dispatch on `(wants_zobrist, wants_checkers)` to `play_hashed` / `play_checkered` / `play_fast` / `play`, and on the null move to the matching `make_null_move_*` — including `make_null_move_fast`, which fixes a stale-cache bug where a pass turn was validated against a `checkers` value the fast make had left behind. **Implemented and measured on branch `gigachess-0.1.7-make-contract`** (commit 52ece61): the indexed conversion lands at +0.8 % over a moves-only pass and the gold PGN comparison is unchanged at 407,350 / 419,385. Merging it needs gigachess 0.1.7 published (owner step).
+- [ ] 2.6 Publish the search numbers: cold first touch, warm scan at 1/2/4/10 threads, records/s and GB/s, name resolution per hit, and the unindexed replay rate. Record in `benchmarks/baseline.json` and `docs/bridge.md`. Verify: reproducible on a quiet machine, with the page-cache state stated, since a warm scan and a cold one differ by the file's worth of I/O.
 
 ## Phase 3 — Archives (moved from `bootstrap-cbh-parser` 5.1/5.2)
 

@@ -8,6 +8,14 @@
 //!
 //! The question is whether a converter should build a position index in the same
 //! pass (C) or leave it to a second pass over the source (B again, plus a read).
+//!
+//! A fourth pass belongs here and is deliberately absent on this branch: it needs
+//! `play_hashed` from gigachess 0.1.7, which asks for the Polyglot key and
+//! declines the `checkers` cache. It is measured on the
+//! `gigachess-0.1.7-make-contract` branch and recorded in ADR-005 §2, where it
+//! turns out to be the whole story — the `checkers` refresh is ~4.4 ns/ply and
+//! the incremental hash is noise.
+//!
 //! The recorded numbers live in `benchmarks/baseline.json`; `blindbase-bridge`
 //! task 0.4 turns this probe into a Criterion benchmark.
 #![allow(missing_docs)]

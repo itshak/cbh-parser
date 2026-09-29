@@ -133,6 +133,48 @@ cancellation.
 - **THEN** the search stops within one chunk
 - **AND** no partial result is reported as complete.
 
+### Requirement: A tag search over a raw database is a scan, and this library runs it
+
+The library SHALL answer which games match a predicate over a database's headers
+without converting it: it SHALL read the header records in bulk, evaluate the
+predicate during the scan, run the scan in parallel, and emit matching games in
+ascending game-number order. It SHALL resolve entity names to ids by lookup in
+the entity tables, so a name predicate costs one lookup rather than a resolution
+per record, and it SHALL return the names of the matching games as slices of the
+mapped entity data without copying them. The scan SHALL NOT open the moves file.
+
+A position query is different in kind and SHALL be served two ways: by replaying
+the source with progress and cancellation, and by handing the consumer each
+position's Polyglot key so the consumer's own index can answer it. The library
+SHALL NOT define, write or read a position index format.
+
+#### Scenario: Filtering a whole database
+
+- **WHEN** a consumer filters the games of an 11-million-game database by an
+  integer predicate such as an Elo threshold
+- **THEN** the matching game numbers arrive in ascending order
+- **AND** the same predicate over the same range yields the same set on any
+  thread count.
+
+#### Scenario: A name predicate resolves once
+
+- **WHEN** a consumer searches by a player's name
+- **THEN** the name resolves to one entity id, and the scan compares that id per
+  record
+- **AND** the player's and opponent's names for each match are returned as
+  borrowed slices, with no per-game string allocated.
+
+#### Scenario: Listing never reads the moves
+
+- **WHEN** a consumer lists or filters a database
+- **THEN** the moves file is never opened.
+
+#### Scenario: An unindexed position search can be stopped
+
+- **WHEN** a consumer runs a position search by replay and cancels it
+- **THEN** the search stops within one chunk and reports no partial result as
+  complete.
+
 ### Requirement: Archive containers are readable for installation
 
 The library SHALL list and extract `.cbv` archives and SHALL decrypt `.cbz`

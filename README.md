@@ -35,8 +35,9 @@ The on-disk format knowledge comes from a **port of `cbformat`** (MIT, from the 
 ## Roadmap
 
 The remaining work is planned around the one consumer. The decisions are in
-`openspec/adr/005` (the bridge is a sink; the CLI is a thin shell) and `006`
-(the rename); the hand-off contract lands as `docs/bridge.md` with the bridge.
+`openspec/adr/005` (the bridge is a sink; the CLI is a thin shell), `006` (the
+rename) and `007` (tag search is a scan, position search is fed); the hand-off
+contract lands as `docs/bridge.md` with the bridge.
 
 1. **`bootstrap-cbh-parser`** (mostly done) — research, port, index/metadata
    readers, game decoding, annotations, the PGN export. Left: fuzzing and this
@@ -48,9 +49,11 @@ The remaining work is planned around the one consumer. The decisions are in
 3. **`blindbase-bridge`** — the plan, in consumer order:
    1. the `Database` façade and header-only game listing;
    2. **conversion**: a sink-based, ordered, parallel stream of tags, `moves2`
-      and per-position Polyglot keys, measured at +11.4 % over a moves-only
-      pass and 9.7× cheaper than indexing separately;
-   3. the position-search feed and a high-throughput unindexed replay;
+      and per-position Polyglot keys — measured at **+0.8 %** over a moves-only
+      pass, and an order of magnitude cheaper than indexing separately;
+   3. **search over the raw set**: a filtered parallel header scan (11.1 M games
+      in 8 ms warm, the moves file never opened), name-to-id lookup, and the
+      position-key feed plus a high-throughput unindexed replay;
    4. `.cbv`/`.cbz` archives (a `.cbv` of the reference set is on disk, so this
       is a consumer path, not a curiosity);
    5. 2CBH behind the same façade and the same sink;
