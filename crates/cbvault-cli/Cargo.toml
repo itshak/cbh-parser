@@ -14,6 +14,12 @@ path = "src/main.rs"
 [dependencies]
 cbvault-format.workspace = true
 cbvault.workspace = true
+cbvault-chess.workspace = true
+gigachess.workspace = true
+
+[[example]]
+name = "dump_null_games"
+path = "examples/dump_null_games.rs"
 
 [lints]
 workspace = true
