@@ -34,11 +34,28 @@ The on-disk format knowledge comes from a **port of `cbformat`** (MIT, from the 
 
 ## Roadmap
 
-1. `bootstrap-cbh-parser` — research, port design, provenance ledger, fixtures, benchmarks, crate skeleton.
-2. Index and metadata readers (`.cbh`, `.cbp`, `.cbt`, `.cbc`, `.cbs`, `.cbe`, `.cbl`, `.cbtt`, `.cbj`, `.flags`).
-3. Game decoding (`.cbg`) onto `moves2`, annotations (`.cba`).
-4. `.cbv`/`.cbz` containers; 2CBH (`.2cbh` family).
-5. BlindBase façade (reference databases, `.bbdb` conversion, position-index feed).
+The remaining work is planned around the one consumer. The decisions are in
+`openspec/adr/005` (the bridge is a sink; the CLI is a thin shell) and `006`
+(the rename); the hand-off contract lands as `docs/bridge.md` with the bridge.
+
+1. **`bootstrap-cbh-parser`** (mostly done) — research, port, index/metadata
+   readers, game decoding, annotations, the PGN export. Left: fuzzing and this
+   change's own release gates.
+2. **`rename-cbvault`** — every crate, path, binary, env var, capability and
+   document renamed to `cbvault`; format names keep their `cbh` spelling
+   (`cbvault_format::cbh`). Runs first, so the work below is written under the
+   real name.
+3. **`blindbase-bridge`** — the plan, in consumer order:
+   1. the `Database` façade and header-only game listing;
+   2. **conversion**: a sink-based, ordered, parallel stream of tags, `moves2`
+      and per-position Polyglot keys, measured at +11.4 % over a moves-only
+      pass and 9.7× cheaper than indexing separately;
+   3. the position-search feed and a high-throughput unindexed replay;
+   4. `.cbv`/`.cbz` archives (a `.cbv` of the reference set is on disk, so this
+      is a consumer path, not a curiosity);
+   5. 2CBH behind the same façade and the same sink;
+   6. the CLI consolidated to `info`, `verify`, `pgn`, `archive` as thin
+      wrappers, with the PGN API kept for the consumer.
 
 ## Provenance & licensing
 

@@ -1,5 +1,19 @@
 # Tasks — bootstrap-cbh-parser
 
+> **Successor note (2026-09-29).** Phases 0–4 are done. What remains has been
+> re-planned around the consumer, in two changes that supersede the open tasks
+> below; this change keeps only the library's own release hygiene.
+>
+> - `rename-cbvault` takes over the project rename (ADR-006) and runs first.
+> - `blindbase-bridge` takes over task 6.1 (the BlindBase façade) and tasks
+>   5.1–5.3 (the `.cbv`/`.cbz` reader), adds the conversion and read-only
+>   serving APIs, 2CBH, and the CLI consolidation (ADR-005).
+>
+> The open tasks below are kept verbatim for the record. Superseded: **5.1,
+> 5.2, 5.3 → `blindbase-bridge` phase 3; 6.1 → `blindbase-bridge` phases 0–2;
+> 6.2, 6.4 → `blindbase-bridge` task 5.3/5.4.** Still owned here: **6.3**
+> (fuzzing) and **6.5** (the gate set for this change's own archive).
+
 ## Phase 0 — Deep research (close every unknown, measure the baseline)
 
 - [x] 0.1 Pin the ancestor: clone `oschess-cb-bridge` at a recorded commit (as of 2026-09-27: `ca9e8f8e4389edd6430f02a14b33ff53552bcadc`) into `vendor/upstream-snapshot/` (git-ignored) and write `docs/port-inventory.md` classifying every `cbformat` module (port as-is / port with chess swap / not needed). Verify: inventory lists files with the commit hash.
