@@ -543,19 +543,22 @@ the CPU-only gap is the I/O accounting, not the chess. Where our own time goes
 record plumbing 9 %, the move walk 37 %, the SAN body and check/mate suffix
 13 %, tags + movetext + output 27 %, the annotations 18 %.
 
-The one real algorithmic difference is the SAN *disambiguation*:
-`gigachess` 0.1.5 answers it with a **full legal movegen of the position**
+The one real algorithmic difference was the SAN *disambiguation*:
+`gigachess` 0.1.5 answered it with a **full legal movegen of the position**
 whenever a second piece of the same type attacks the destination — 4.0 % of
 moves (558,028 of 13,908,447) — while the ancestor tests each candidate on its
-own. It is cheaper (8.1 ns per SAN body against 13.5 ns, about 4.8 s of a
-whole-database export) and **identical in output**: 0 differing moves over
-13.9 M moves, and the same gold result (407,350 of 419,385, the same 12,035
-diffs). So it is not a correctness wall — it is gigachess work, and the hunk is
-in `docs/gigachess-san-disambiguation.patch`. The one trap is the king to ask
-about: it is the *mover's*, not the side to move after the move. The mate test,
-by contrast, has nothing to gain: `count_legal_moves` and `has_legal_move`
-agree on all 732,592 in-check moves and cost the same (51 ns per check, 1.8 s
-over the database).
+own. **That change has landed upstream**: gigachess **0.1.6**
+(`turbochess-rs-san-disambiguation-direct`) asks each pre-filtered candidate
+directly, and the two forms are identical in output — 0 differing moves over
+13.9 M moves against a movegen oracle, the same gold result (407,350 of 419,385,
+the same 12,035 diffs), and the SAN body measured on that slice falls from
+**13.5 ns to 2.2 ns per move** (54 ns against 340 ns per branch firing). The
+trap it had to avoid is the king to ask about: the *mover's*, read from the
+caller's position before the candidate is made — a friendly rook on h1 defends
+its own king on e1, and asking the other question silently drops hints
+(83,337 exact games, once measured). The mate test, by contrast, has nothing to
+gain: `count_legal_moves` and `has_legal_move` agree on all 732,592 in-check
+moves at the same price.
 
 The like-for-like run — same database, same machine, one after the other, both
 writing the annotations, output to `/dev/null` — is the table below. It also

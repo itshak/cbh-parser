@@ -786,6 +786,39 @@
         "pgn_bytes": 7683725549,
         "note": "the single-threaded run is 4-8 s above the 136.0 s measured earlier today; the machine's run-to-run range today is that wide, and the parallel figure is the stable one"
       }
+    },
+    "gigachess_016_san_disambiguation": {
+      "recorded": "2026-09-29",
+      "upstream_change": "itshak/gigachess-rs v0.1.6, `turbochess-rs-san-disambiguation-direct` (committed 4428794, tag v0.1.6)",
+      "what_changed": "move_to_san_body's ambiguous branch asks each pre-filtered candidate directly - one 144B stack copy, one make_move_unchecked, one king-safety query for the mover's king against the side that moves next, one unmake_move - instead of generating every legal move in the position and filtering that list",
+      "correctness": {
+        "gigachess_side": "0 differing moves over 13,908,447 moves of the reference slice (558,028 through the branch, 3,513,866 carrying a qualifier) against a movegen oracle; gigachess's own `tests/san_disambiguation_property.rs` over 200,000 moves from random playouts incl. two Chess960 starts; `cargo test --all-features` and `--features pext` green, `san_parity` against shakmaty::SanPlus unchanged",
+        "cbvault_side": "gold comparison 407,350 of 419,385 exact, 12,035 diffs in the same classes, 0 annotation-read and 0 decode errors - unchanged; whole-database output 7,683,725,549 bytes, byte-identical"
+      },
+      "cost_of_the_san_body_measured_here": {
+        "method": "examples/san_probe.rs over 200,000 records of the reference database (13,908,447 moves), one pass rendering nothing, one with move_to_san_body",
+        "ns_per_move_gigachess_0_1_5": 13.5,
+        "ns_per_move_gigachess_0_1_6": 2.2,
+        "ns_per_branch_firing_before": 340,
+        "ns_per_branch_firing_after": 54,
+        "reading": "the branch fires on 4.0 % of moves, so the stage drops from about 11.9 s to about 1.9 s over the 883,141,297 plies of a whole-database export"
+      },
+      "in_crate_criterion": "cargo bench --bench micro, paired: san_48 per 48 renders -3.2 % on a busy middlegame, +1.9 % on an opening line where the branch almost never fires",
+      "cbvault_criterion_fixture": "the export_100k fixture is 4-ply openings, where the branch never fires, so it shows the common path's code growth rather than the win: +2.5 to +3.4 % single and at 2-4 threads. Real games are the case the change is for.",
+      "dependency": "gigachess 0.1.6, with a `[patch.crates-io]` path to the sibling checkout until the release reaches crates.io",
+      "wall_clock_alternating_a_b": {
+        "method": "the whole 11,151,119-record export to /dev/null, one thread, gigachess 0.1.6 and 0.1.5 alternating with a rebuild between them, three runs each",
+        "gigachess_0_1_6_seconds": [
+          168.52,
+          135.3,
+          134.24
+        ],
+        "gigachess_0_1_5_seconds": [
+          134.59,
+          141.73
+        ],
+        "reading": "the first run of each 0.1.6 build pays for a cold binary and a cold page cache (168.52 s); in steady state the two are 134.2-135.3 s against 134.6-141.7 s. The box's run-to-run spread today is wider than the effect, so the wall clock does not resolve it and the per-ply measurement above is the number to trust: about 10 s of SAN work removed over 883,141,297 plies, with the export also bound by memory traffic, so the end-to-end share is smaller."
+      }
     }
   }
 }
