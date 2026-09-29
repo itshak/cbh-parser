@@ -291,7 +291,8 @@ fn nags(out: &mut String, anns: &GameAnnotations<'_>, items: [&[(i32, u32)]; 2])
         // (447+ games of the Mega's export confirm the order).
         for nag in [prefix, on_move, on_position] {
             if nag != 0 {
-                out.push_str(" $");
+                out.push(' ');
+                out.push('$');
                 let _ = write!(out, "{nag}");
             }
         }
@@ -560,11 +561,13 @@ fn comment(out: &mut String, parts: &Parts, pre: &str, post: &str) -> bool {
             continue;
         }
         if !first {
-            out.push_str(match part.sep {
-                Sep::None => "",
-                Sep::Space => " ",
-                Sep::Semicolon => ";",
-            });
+            // A one-byte separator as a `push`, not a `push_str`: a `memcpy`
+            // call per separator, once per comment part of every comment.
+            match part.sep {
+                Sep::None => {}
+                Sep::Space => out.push(' '),
+                Sep::Semicolon => out.push(';'),
+            }
         }
         out.push_str(&part.text);
         first = false;

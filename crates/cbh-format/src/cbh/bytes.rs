@@ -83,6 +83,13 @@ impl NameBuf {
         let end = field.iter().position(|&b| b == 0).unwrap_or(field.len());
         let field = &field[..end];
         self.len = 0;
+        // The fast path every ChessBase name takes: plain ASCII with no byte
+        // above 0x7f, which is a valid `str` by construction — one vectorizable
+        // pass instead of a UTF-8 validation, on the field's 20 to 50 bytes.
+        if field.iter().all(|&b| b.is_ascii()) {
+            self.push_bytes(field);
+            return;
+        }
         match std::str::from_utf8(field) {
             Ok(text) => self.push_bytes(text.as_bytes()),
             Err(e) if e.error_len().is_none() => {

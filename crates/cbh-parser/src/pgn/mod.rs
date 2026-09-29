@@ -44,17 +44,20 @@ use cbh_format::error::{Error, Result};
 use cbh_format::game::annotations::{Annotation, GAME_POSITION, timing};
 use cbh_format::game::{GameResult, Head, ROUND_TEXT_BYTES, RecordKind, round_text};
 use comments::{At, Bare, Commentary, Notes};
-use gigachess::san::{check_mate_suffix, move_to_san_body};
+use gigachess::san::{San, check_mate_suffix, move_to_san_body};
 use gigachess::{Board, Color, Move};
 
 /// No child of a node.
 const NONE: u32 = u32::MAX;
 
-/// One decoded move: its SAN in the shared text buffer, the move number and
-/// side it was played with, and its place in the tree.
+/// One decoded move: its SAN and check/mate suffix inline — `gigachess` hands
+/// the body over in a fixed-size [`San`] by value, so the walk stores it in
+/// the node without a copy, and there is no shared text buffer to grow or to
+/// read back — the move number and side it was played with, and its place in
+/// the tree.
 #[derive(Debug)]
 struct Node {
-    san: (u32, u32),
+    san: San,
     fullmove: u16,
     white: bool,
     first_child: u32,
@@ -62,12 +65,22 @@ struct Node {
     next_sibling: u32,
 }
 
-/// A game's move tree while it is decoded: the nodes, the SAN text and the
-/// open brackets.
+/// One step of the movetext traversal, on the writer's reused stack.
+#[derive(Debug)]
+enum EmitStep {
+    /// Continue the line whose last written move is `node`.
+    Line { node: u32, force_number: bool },
+    /// Write the alternative `alt` to the main move `main`, and those after it.
+    Alternatives { main: u32, alt: u32 },
+    /// The alternatives end; return to the main move, repeating its number.
+    Close,
+}
+
+/// A game's move tree while it is decoded: the nodes, each with its SAN, and
+/// the open brackets.
 #[derive(Debug, Default)]
 struct Tree {
     nodes: Vec<Node>,
-    sans: String,
     cur: u32,
     parent_of_last: u32,
     branches: Vec<u32>,
@@ -82,7 +95,7 @@ impl Tree {
     fn new() -> Tree {
         Tree {
             nodes: vec![Node {
-                san: (0, 0),
+                san: San::new(),
                 fullmove: 0,
                 white: true,
                 first_child: NONE,
@@ -98,7 +111,6 @@ impl Tree {
         self.nodes.truncate(1);
         self.nodes[0].first_child = NONE;
         self.nodes[0].last_child = NONE;
-        self.sans.clear();
         self.cur = 0;
         self.parent_of_last = 0;
         self.branches.clear();
@@ -122,7 +134,9 @@ impl Tree {
 
 impl MoveSink for Tree {
     fn play(&mut self, before: &Board, mv: u16, _main: bool) {
-        let start = self.sans.len() as u32;
+        // The SAN body, built in a fixed-size buffer `gigachess` returns by
+        // value: nothing is copied to record it.
+        let mut san = San::new();
         // The body needs only this position; the check/mate suffix needs the one
         // the move leaves behind, which `played` is handed. `gigachess` 0.1.5
         // exposes the two halves (`san::move_to_san_body`,
@@ -131,15 +145,15 @@ impl MoveSink for Tree {
         // (`pgn-export-sota-performance` task 6.4).
         self.suffix_pending = false;
         match mv {
-            NULL_MOVE => self.sans.push_str("--"),
+            NULL_MOVE => san.push_str("--"),
             mv => {
                 let mv = Move::from_word(mv);
                 match move_to_san_body(before, mv) {
-                    Some(san) => {
-                        self.sans.push_str(&san);
+                    Some(body) => {
+                        san = body;
                         self.suffix_pending = true;
                     }
-                    None => self.sans.push_str("??"),
+                    None => san.push_str("??"),
                 }
             }
         }
@@ -161,7 +175,7 @@ impl MoveSink for Tree {
         let id = self.nodes.len() as u32;
         self.nodes.push(Node {
             // Closed by `played`, once the suffix is in.
-            san: (start, start),
+            san,
             fullmove,
             white,
             first_child: NONE,
@@ -185,12 +199,9 @@ impl MoveSink for Tree {
         if self.suffix_pending
             && let Some(c) = check_mate_suffix(after)
         {
-            self.sans.push(c);
+            let cur = self.cur as usize;
+            self.nodes[cur].san.push(c);
         }
-        // The SAN of a node spans its body and its suffix; the walk always calls
-        // `played` right after the move, so every node is closed.
-        let cur = self.cur as usize;
-        self.nodes[cur].san.1 = self.sans.len() as u32;
     }
 
     fn branch(&mut self) {
@@ -211,15 +222,18 @@ impl MoveSink for Tree {
 
 /// Writes move `n` and, when due, its number: the note before the number and
 /// the notes after the SAN belong to the caller ([`emit`]).
+#[inline]
 fn write_move(out: &mut String, tree: &Tree, n: u32, force_number: bool) {
     let node = &tree.nodes[n as usize];
+    // The number, the SAN and the space after it, in one reservation: this
+    // runs 869,502,065 times over the reference database.
+    out.reserve(node.san.len() + 8);
     if node.white {
         push_move_number(out, node.fullmove, false);
     } else if force_number {
         push_move_number(out, node.fullmove, true);
     }
-    let san = tree.sans.get(node.san.0 as usize..node.san.1 as usize).unwrap_or("??");
-    out.push_str(san);
+    out.push_str(node.san.as_str());
 }
 
 /// A move's number: `12. ` for White, `12... ` where a number is forced (the
@@ -228,11 +242,14 @@ fn write_move(out: &mut String, tree: &Tree, n: u32, force_number: bool) {
 #[inline]
 fn push_move_number(out: &mut String, n: u16, black: bool) {
     push_u16(out, n);
+    // Byte pushes, not a `push_str`: a three-byte copy is a `memcpy` call, and
+    // this runs once per move — 869,502,065 times over the reference database.
     if black {
-        out.push_str("... ");
-    } else {
-        out.push_str(". ");
+        out.push('.');
+        out.push('.');
     }
+    out.push('.');
+    out.push(' ');
 }
 
 /// An unsigned number in decimal, without the formatting machinery: the
@@ -284,15 +301,8 @@ fn push_ascii(out: &mut String, bytes: &[u8]) {
 /// Writes the tree below the root as movetext, in PGN order: iterative, so a
 /// deeply nested game costs heap and not stack. `notes` writes what follows
 /// each move's number and SAN: its comments, NAGs and graphics.
-fn emit(tree: &Tree, notes: &mut impl Notes, out: &mut String) -> Result<()> {
-    enum Step {
-        /// Continue the line whose last written move is `node`.
-        Line { node: u32, force_number: bool },
-        /// Write the alternative `alt` to the main move `main`, and those after it.
-        Alternatives { main: u32, alt: u32 },
-        /// The alternatives end; return to the main move, repeating its number.
-        Close,
-    }
+fn emit(tree: &Tree, notes: &mut impl Notes, out: &mut String, steps: &mut Vec<EmitStep>) -> Result<()> {
+    use EmitStep::*;
     // Writes move `n`, its number when due and its notes. Comments do not
     // force the following number: ChessBase's export writes `e5` after a
     // comment, not `1... e5` — a number is due at the game's first move and
@@ -308,33 +318,36 @@ fn emit(tree: &Tree, notes: &mut impl Notes, out: &mut String) -> Result<()> {
         Ok(())
     };
     let nodes = &tree.nodes;
-    let mut steps = vec![Step::Line { node: 0, force_number: true }];
+    // The writer's own step stack, reused game to game: a `Vec` per game would
+    // be eleven million allocations for the megabase run.
+    steps.clear();
+    steps.push(EmitStep::Line { node: 0, force_number: true });
     while let Some(step) = steps.pop() {
         match step {
-            Step::Line { node, force_number } => {
+            Line { node, force_number } => {
                 let main = nodes[node as usize].first_child;
                 if main == NONE {
                     continue;
                 }
                 write(out, main, force_number)?;
                 match nodes[main as usize].next_sibling {
-                    NONE => steps.push(Step::Line { node: main, force_number: false }),
-                    alt => steps.push(Step::Alternatives { main, alt }),
+                    NONE => steps.push(Line { node: main, force_number: false }),
+                    alt => steps.push(Alternatives { main, alt }),
                 }
             }
-            Step::Alternatives { main, alt } => {
+            Alternatives { main, alt } => {
                 if alt == NONE {
                     // Back on the main line after its alternatives: repeat the number.
-                    steps.push(Step::Line { node: main, force_number: true });
+                    steps.push(Line { node: main, force_number: true });
                 } else {
-                    steps.push(Step::Alternatives { main, alt: nodes[alt as usize].next_sibling });
-                    steps.push(Step::Close);
+                    steps.push(Alternatives { main, alt: nodes[alt as usize].next_sibling });
+                    steps.push(Close);
                     out.push('(');
                     write(out, alt, true)?;
-                    steps.push(Step::Line { node: alt, force_number: false });
+                    steps.push(Line { node: alt, force_number: false });
                 }
             }
-            Step::Close => {
+            Close => {
                 if out.ends_with(' ') {
                     out.pop();
                 }
@@ -368,38 +381,40 @@ fn write_tags<H: Head>(
         }
         None => ("?", "?"),
     };
-    push_escaped_tag(out, "Event", event);
-    push_escaped_tag(out, "Site", place);
-    push_tag(out, "Date", str_from_bytes(&header.played_date().text()));
+    push_escaped_tag(out, "[Event \"", event);
+    push_escaped_tag(out, "[Site \"", place);
+    push_tag(out, "[Date \"", str_from_bytes(&header.played_date().text()));
     push_round(out, header.round(), names);
     let white = id(header.white())
         .map(|id| entities.player_into(id, &mut names.white_last, &mut names.white_first))
         .transpose()?
         .flatten();
-    push_escaped_player(out, "White", white);
+    push_escaped_player(out, "[White \"", white);
     let black = id(header.black())
         .map(|id| entities.player_into(id, &mut names.black_last, &mut names.black_first))
         .transpose()?
         .flatten();
-    push_escaped_player(out, "Black", black);
-    push_tag(out, "Result", result_tag(header.result()));
-    if let Some(eco) = header.eco().pgn() {
-        push_tag(out, "ECO", &eco);
+    push_escaped_player(out, "[Black \"", black);
+    push_tag(out, "[Result \"", result_tag(header.result()));
+    if let Some(eco) = header.eco().code_text() {
+        // The code is three ASCII bytes; `Eco::pgn` would allocate a `String`
+        // for every game that has one, which is most of them.
+        push_ascii_tag(out, "[ECO \"", &eco);
     }
     let (white_elo, black_elo) = header.elo();
     if white_elo > 0 {
-        push_number_tag(out, "WhiteElo", white_elo as u32);
+        push_number_tag(out, "[WhiteElo \"", white_elo as u32);
     }
     if black_elo > 0 {
-        push_number_tag(out, "BlackElo", black_elo as u32);
+        push_number_tag(out, "[BlackElo \"", black_elo as u32);
     }
     if *start != Start::Standard {
         if matches!(start, Start::Chess960(_)) || matches!(start, Start::Setup(s) if s.chess960) {
-            push_tag(out, "Variant", "Chess960");
+            push_tag(out, "[Variant \"", "Chess960");
         }
-        push_tag(out, "SetUp", "1");
+        push_tag(out, "[SetUp \"", "1");
         let fen = fen_tag(board, start);
-        push_tag(out, "FEN", &fen);
+        push_tag(out, "[FEN \"", &fen);
     }
     out.push('\n');
     Ok(())
@@ -420,41 +435,51 @@ struct Names {
 
 /// `[<name> "<value>"]` and its newline, the value as it stands.
 #[inline]
-fn push_tag(out: &mut String, name: &str, value: &str) {
-    out.push('[');
-    out.push_str(name);
-    out.push_str(" \"");
+fn push_tag(out: &mut String, head: &str, value: &str) {
+    // `head` is the whole `[Name \"` in one literal: three writes a tag become
+    // two, and this runs nine times per game.
+    out.push_str(head);
     out.push_str(value);
-    out.push_str("\"]\n");
+    out.push('"');
+    out.push(']');
+    out.push('\n');
 }
 
 /// `[<name> "<value>"]` and its newline, the value escaped: a quote or a
 /// backslash is escaped and a figurine code becomes its letter.
 #[inline]
-fn push_escaped_tag(out: &mut String, name: &str, value: &str) {
-    out.push('[');
-    out.push_str(name);
-    out.push_str(" \"");
+fn push_escaped_tag(out: &mut String, head: &str, value: &str) {
+    out.push_str(head);
     escape_into(out, value);
-    out.push_str("\"]\n");
+    out.push('"');
+    out.push(']');
+    out.push('\n');
+}
+
+/// `[<name> "<value>"]` and its newline for a value that is ASCII bytes.
+#[inline]
+fn push_ascii_tag(out: &mut String, head: &str, value: &[u8]) {
+    out.push_str(head);
+    push_ascii(out, value);
+    out.push('"');
+    out.push(']');
+    out.push('\n');
 }
 
 /// `[<name> "<number>"]` and its newline, the number written by hand.
 #[inline]
-fn push_number_tag(out: &mut String, name: &str, value: u32) {
-    out.push('[');
-    out.push_str(name);
-    out.push_str(" \"");
+fn push_number_tag(out: &mut String, head: &str, value: u32) {
+    out.push_str(head);
     push_u32(out, value);
-    out.push_str("\"]\n");
+    out.push('"');
+    out.push(']');
+    out.push('\n');
 }
 
 /// `[<name> "<value>"]` and its newline for a player: `Last, First` escaped.
 #[inline]
-fn push_escaped_player(out: &mut String, name: &str, player: Option<(&str, &str)>) {
-    out.push('[');
-    out.push_str(name);
-    out.push_str(" \"");
+fn push_escaped_player(out: &mut String, head: &str, player: Option<(&str, &str)>) {
+    out.push_str(head);
     match player {
         Some((last, first)) => {
             escape_into(out, last);
@@ -473,7 +498,9 @@ fn push_escaped_player(out: &mut String, name: &str, player: Option<(&str, &str)
         }
         None => out.push('?'),
     }
-    out.push_str("\"]\n");
+    out.push('"');
+    out.push(']');
+    out.push('\n');
 }
 
 /// The ten ASCII bytes of a date, borrowed as a string (every byte is ASCII,
@@ -506,7 +533,9 @@ fn push_round(out: &mut String, (round, sub): (i32, i32), names: &mut Names) {
             }
         }
     }
-    out.push_str("\"]\n");
+    out.push('"');
+    out.push(']');
+    out.push('\n');
 }
 
 /// The FEN tag ChessBase's export writes: the stored move number verbatim —
@@ -577,8 +606,9 @@ fn as_io(e: Error) -> io::Error {
 #[derive(Debug, Default)]
 pub struct PgnWriter {
     tree: Tree,
-    tags: String,
-    movetext: String,
+    /// One game whole: its tags, its movetext, its result token and the blank
+    /// line after it, so the sink is written once per game.
+    game: String,
     /// Every annotation's (position, byte offset), ascending: the game's
     /// index for [`Commentary`], reused game to game.
     index: Vec<(i32, u32)>,
@@ -592,6 +622,8 @@ pub struct PgnWriter {
     /// The boards of the starts seen, so a standard start is built once
     /// instead of parsed from a FEN per game.
     starts: StartCache,
+    /// The movetext traversal's step stack, reused game to game.
+    steps: Vec<EmitStep>,
 }
 
 impl PgnWriter {
@@ -603,9 +635,7 @@ impl PgnWriter {
     /// The bytes the writer keeps for reuse (its high-water mark): a caller
     /// exporting many games holds one game's worth, not a database's.
     pub fn capacity(&self) -> usize {
-        self.tags.capacity()
-            + self.movetext.capacity()
-            + self.tree.sans.capacity()
+        self.game.capacity()
             + self.tree.nodes.capacity() * size_of::<Node>()
             + self.index.capacity() * size_of::<(i32, u32)>()
             + self.evp.capacity()
@@ -634,12 +664,14 @@ impl PgnWriter {
         let start = start_as_played(what, game).map_err(as_io)?;
         let board = start_board_cached(&start, &mut self.starts).map_err(as_io)?;
         self.tree.clear();
-        self.tags.clear();
-        self.movetext.clear();
-        write_tags(&mut self.tags, header, entities, &start, &board, &mut self.names).map_err(as_io)?;
+        // The whole game — tags, movetext, result token, blank line — in one
+        // buffer, written with one `write_all`: two buffers meant two calls
+        // into the sink per game, eleven million times over.
+        self.game.clear();
+        write_tags(&mut self.game, header, entities, &start, &board, &mut self.names).map_err(as_io)?;
         let stats = walk_from(what, game, &start, &mut self.tree).map_err(as_io)?;
         match anns {
-            None => emit(&self.tree, &mut Bare, &mut self.movetext).map_err(as_io)?,
+            None => emit(&self.tree, &mut Bare, &mut self.game, &mut self.steps).map_err(as_io)?,
             Some(a) => {
                 a.check_positions(stats.total_plies).map_err(as_io)?;
                 self.prepare(a).map_err(as_io)?;
@@ -651,14 +683,20 @@ impl PgnWriter {
                     moves: stats.total_plies,
                     last: self.tree.main_line_last(),
                 };
-                notes.game_comment(&mut self.movetext).map_err(as_io)?;
-                emit(&self.tree, &mut notes, &mut self.movetext).map_err(as_io)?;
+                notes.game_comment(&mut self.game).map_err(as_io)?;
+                emit(&self.tree, &mut notes, &mut self.game, &mut self.steps).map_err(as_io)?;
             }
         }
-        out.write_all(self.tags.as_bytes())?;
-        out.write_all(self.movetext.as_bytes())?;
-        out.write_all(result_tag(header.result()).as_bytes())?;
-        out.write_all(b"\n\n")
+        // The result token and the blank line that ends a game, in the same
+        // buffer, so the sink is written once.
+        // Short strings go in byte by byte: a `push_str` of one or two bytes is
+        // a `memcpy` call, and this is once per game.
+        for b in result_tag(header.result()).as_bytes() {
+            self.game.push(char::from(*b));
+        }
+        self.game.push('\n');
+        self.game.push('\n');
+        out.write_all(self.game.as_bytes())
     }
 
     /// Fills the writer's index and `[%evp …]` from a game's annotations:
@@ -746,7 +784,7 @@ mod tests {
             let mut want = String::new();
             let _ = writeln!(want, r#"[Event "{}"]"#, escape_old(value));
             let mut got = String::new();
-            push_escaped_tag(&mut got, "Event", value);
+            push_escaped_tag(&mut got, "[Event \"", value);
             assert_eq!(got, want, "Event {value:?}");
         }
         for (last, first) in [("Morphy", ""), ("Delaire", "H."), ("Ward", "JH"), ("Keres", "Paul"), ("", "")] {
@@ -754,17 +792,17 @@ mod tests {
             let mut want = String::new();
             let _ = writeln!(want, r#"[White "{}"]"#, escape_old(&name));
             let mut got = String::new();
-            push_escaped_player(&mut got, "White", Some((last, first)));
+            push_escaped_player(&mut got, "[White \"", Some((last, first)));
             assert_eq!(got, want, "player {last:?} {first:?}");
         }
         let mut got = String::new();
-        push_escaped_player(&mut got, "White", None);
+        push_escaped_player(&mut got, "[White \"", None);
         assert_eq!(got, "[White \"?\"]\n");
         for n in [0u32, 1, 2404, 32767] {
             let mut want = String::new();
             let _ = writeln!(want, r#"[WhiteElo "{n}"]"#);
             let mut got = String::new();
-            push_number_tag(&mut got, "WhiteElo", n);
+            push_number_tag(&mut got, "[WhiteElo \"", n);
             assert_eq!(got, want, "elo {n}");
         }
     }

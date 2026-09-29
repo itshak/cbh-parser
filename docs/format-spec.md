@@ -500,12 +500,23 @@ Whole-database export, same machine, output to `/dev/null`
 the same bytes, 64,899 → **80,542** records/s, system time 2.57 s → 1.5 s, and
 **−40 % time / +66 % throughput** on the controlled `export_100k_single`
 Criterion bench, 300 → **499 Kelem/s**; with the Rayon pipeline
-(`--threads 10`) **18.8 s**):
+(`--threads 10`) **18.8 s** — and a second round after the change was archived,
+measured back to back against the archived commit on the same machine: the SAN
+inline in its node (gigachess hands the body over in a fixed-size `San` by
+value, so recording a move copies nothing and the shared text buffer is gone),
+no per-game `String` or `Vec`, one buffer and one `write_all` per game, tag
+heads as single literals, the one-to-three byte writes as byte pushes, an ASCII
+fast path in `NameBuf::set`, and recycled chunk buffers in the parallel
+pipeline. That is **128.1–130.0 s single-threaded (87,029 records/s)** and
+**19.7–20.6 s at ten threads (144.2 s of CPU against 152.4 s, 0.73 s of system
+time against 1.68 s)**, byte for byte the same 7,555,609,011 bytes, with the
+gold counts unchanged. The numbers are in `benchmarks/baseline.json` under
+`second_round_inline_san_and_write_path`):
 
 | | upstream `cbformat` | ours |
 |---|---|---|
-| wall clock, 11.1 M records, output `/dev/null` | **141.5 s** | **138.5 s** (1 thread) · **18.8 s** (10 threads) |
-| user / system | 110.0 s / **30.3 s** | 135.0 s / **1.5 s** |
+| wall clock, 11.1 M records, output `/dev/null` | **141.5 s** | **128–138 s** (1 thread, 128 s after the second round) · **18.8–20 s** (10 threads) |
+| user / system | 110.0 s / **30.3 s** | 129–135 s / **0.7 s** |
 | PGN bytes produced (whole database) | 7.68 GB | 7.56 GB |
 | peak RSS (`/usr/bin/time -l`, macOS) | **5.89 GB** (the whole export accumulated in one `String`, then one `fs::write`) | **1.64 GB** (one game's worth of reused buffers) |
 | records dropped | 1,749 (texts or render errors, silently) | 5 typed errors, each named |

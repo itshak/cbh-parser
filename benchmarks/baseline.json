@@ -469,6 +469,107 @@
         "parallel_8_threads": "the same, through the Rayon pipeline",
         "change": "none"
       }
+    },
+    "second_round_inline_san_and_write_path": {
+      "recorded": "2026-09-29",
+      "change": "pgn-export-sota-performance, after the archive: the SAN inline in its node, no per-game String or Vec, one game per buffer and one write_all, tag heads as literals, tiny memcpys as byte pushes, pooled parallel chunk buffers",
+      "what": [
+        "the SAN body and its check/mate suffix live in the node (gigachess hands the body over in a fixed-size San by value), so the walk records a move with no copy and the shared text buffer is gone",
+        "no per-game String for the ECO tag (the three ASCII bytes of the code), no per-game Vec for the traversal's step stack (the writer's buffer), one buffer per game for tags + movetext + result + blank line, and one write_all per game",
+        "one literal per tag head, and the one-to-three byte writes (the move number's '. ', the tag's closing quote, the separators) as byte pushes instead of push_str's memcpy call",
+        "NameBuf::set takes ASCII names without a UTF-8 validation pass",
+        "the parallel pipeline recycles its chunk buffers, each sized from the run's high-water mark (a megabase chunk is ~5.6 MiB, so a fresh buffer grew into it by doubling)"
+      ],
+      "paired_whole_database": {
+        "method": "baseline (the archived commit) and this round measured back to back in the same session on the same machine, as ADR-002 requires; wall clock varies 3-4 % with the page cache, so user time is the stable side",
+        "single_thread": {
+          "baseline_real_seconds": 134.97,
+          "baseline_user_seconds": 134.44,
+          "baseline_records_per_second": 82620,
+          "this_round_real_seconds": [
+            128.13,
+            129.87,
+            129.97,
+            135.4
+          ],
+          "this_round_user_seconds": [
+            128.99,
+            134.77
+          ],
+          "this_round_records_per_second": 87029,
+          "reading": "-4 % wall on the quiet runs (128.1-130.0 s), 87,029 records/s"
+        },
+        "ten_threads": {
+          "baseline_real_seconds": 20.42,
+          "baseline_user_seconds": 152.4,
+          "baseline_sys_seconds": 1.68,
+          "baseline_peak_rss_bytes": 3377774592,
+          "this_round_real_seconds": [
+            19.74,
+            20.08,
+            20.59
+          ],
+          "this_round_user_seconds": [
+            144.21,
+            145.06
+          ],
+          "this_round_sys_seconds": 0.73,
+          "this_round_peak_rss_bytes": 3274817536,
+          "reading": "-5.4 % user, -57 % system, -3 % peak memory; the wall clock is inside the run-to-run range"
+        },
+        "bytes_identical": true,
+        "pgn_bytes": {
+          "sequential": 7555609011,
+          "parallel": 7683725549
+        },
+        "against_upstream_cbformat_141_47s": "single thread 128.1 s is 9.4 % faster; ten threads ~20 s is about 7.1x faster"
+      },
+      "criterion_export_100k": {
+        "single_thread_ms": [
+          193.23,
+          193.64,
+          194.06
+        ],
+        "single_thread_baseline_ms": [
+          199.65,
+          200.58,
+          201.85
+        ],
+        "two_threads_ms": [
+          104.7,
+          104.94,
+          105.18
+        ],
+        "four_threads_ms": [
+          56.902,
+          57.027,
+          57.157
+        ],
+        "eight_threads_ms": [
+          40.477,
+          41.033,
+          41.586
+        ],
+        "reading": "-3.2 % single, -9.5 % at two threads, -7.3 % at four; the eight-thread fixture case is inside the baseline's range (the fixture is two waves of chunks, so the buffer pool cannot amortise)"
+      },
+      "gold_parity": {
+        "matched": 407350,
+        "annotation_diffs": 50,
+        "other_movetext": 3,
+        "tags": 5,
+        "annotation_read_errors": 0,
+        "decode_errors": 0,
+        "unchanged": true,
+        "gates": "cargo fmt --check, cargo clippy --workspace --all-targets (0 warnings), cargo test --workspace (0 failures), the sequential and the --parallel gold runs"
+      },
+      "profile_after": {
+        "gigachess_share": "~45 % (attackers_to 17 % for SAN disambiguation and check detection, is_pseudo_legal 10 % for the candidate legality) - a crates.io dependency, so the request stays upstream",
+        "walk": "the move walk and the node bookkeeping, unchanged",
+        "memmove": "~10 %, now the SAN copy into the movetext (one 2-8 byte memcpy per move) and the game buffer into the sink's 1 MiB buffer; the number, tag and separator writes no longer contribute",
+        "name_and_tag_path": "NameBuf::set 1.9 %, escape_into 1.1 %, from_utf8 0.7 % (was 1.6 %)",
+        "allocator": "out of the top of the profile: no per-game allocation is left in the export"
+      },
+      "not_done_and_why": "the full single-copy movetext stays infeasible (see the archived task 7.1): a side line is stored before the main continuation it belongs to, and MoveSink::branch fires after any move followed by a line change, so the walk cannot own the layout or the forced numbers. What it would still save is the per-move SAN copy, which needs unsafe to beat the memcpy call - the workspace warns on unsafe and the gain does not justify it."
     }
   }
 }

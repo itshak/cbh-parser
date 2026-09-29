@@ -13,6 +13,7 @@
 use std::io::Write;
 use std::path::Path;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use cbh_format::cbh::{Annotations, Batch, Entities, Headers, Wide};
 use cbh_format::error::Result;
@@ -93,12 +94,28 @@ pub fn export_range(
     let mut stats = ExportStats::default();
     let sink = &mut *out;
 
+    // The chunk buffers, recycled: a megabase chunk is several megabytes, so
+    // allocating one per chunk is a page-fault storm (1,361 chunks of the
+    // reference database) on top of the realloc copy when the first guess at
+    // the size is short. The writer stage hands each buffer back once its bytes
+    // are out, so the pool holds about one buffer per worker.
+    let buffers: Mutex<Vec<Vec<u8>>> = Mutex::new(Vec::new());
+    // The largest chunk rendered so far, which sizes the buffers a worker
+    // takes: a megabase chunk is ~5.6 MiB, and growing into it by doubling
+    // would copy megabytes per worker before the pool settles.
+    let high_water = AtomicUsize::new(0);
+
     // One wave of chunks per worker, each rendered into its own buffer; the
-    // next wave renders while this one is written.
+    // next wave renders while the current one is written.
     let render = |wave: &[(u32, u32)]| -> Vec<(u32, Vec<u8>, ExportStats)> {
         wave.par_iter()
             .map(|&(first, last)| {
-                let mut bytes = Vec::with_capacity(batch as usize * 512);
+                let mut bytes = buffers.lock().unwrap_or_else(|e| e.into_inner()).pop().unwrap_or_default();
+                bytes.clear();
+                let hint = high_water.load(Ordering::Relaxed);
+                if bytes.capacity() < hint {
+                    bytes.reserve(hint - bytes.len());
+                }
                 let s = render_chunk(
                     &headers,
                     &entities,
@@ -124,6 +141,12 @@ pub fn export_range(
             stats.texts += s.texts;
             stats.bytes += s.bytes;
             stats.failures += s.failures;
+            // The bytes are out: the buffer goes back for the next chunk, and
+            // the high-water mark is what the next worker's buffer is sized for.
+            high_water.fetch_max(bytes.len(), Ordering::Relaxed);
+            if bytes.capacity() > 0 {
+                buffers.lock().unwrap_or_else(|e| e.into_inner()).push(bytes);
+            }
         }
     };
 
