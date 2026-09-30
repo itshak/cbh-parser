@@ -35,15 +35,22 @@ fn text_blocks_read_their_fields() {
         ]),
     );
 
-    let blocks = TextBlocks::open(&db.base()).unwrap();
-    assert_eq!(blocks.count(), 1);
-    assert_eq!(blocks.text(0, 0).unwrap().as_deref(), Some("Cross Ta"));
-    assert_eq!(blocks.text(0, 1).unwrap().as_deref(), Some("Second"));
-    assert_eq!(blocks.text(0, 2).unwrap().as_deref(), Some("Introduction"), "up to the NUL");
-    assert_eq!(blocks.text(0, 3).unwrap().as_deref(), Some(""), "an empty field is empty");
-    assert_eq!(blocks.text(0, 8).unwrap(), None, "eight fields only");
-    assert_eq!(blocks.text(1, 0).unwrap(), None);
-    assert_eq!(blocks.data(0).unwrap().map(|d| d.len()), Some(1608));
+    // Scoped so `blocks` — and the mapping it holds — is dropped before the
+    // rewrites below. Windows refuses to write a file that still has an open
+    // user-mapped section (`ERROR_USER_MAPPED_FILE`, 1224); Unix does not mind,
+    // so holding the reader across a rewrite is a test that passes on two
+    // platforms and fails on the third.
+    {
+        let blocks = TextBlocks::open(&db.base()).unwrap();
+        assert_eq!(blocks.count(), 1);
+        assert_eq!(blocks.text(0, 0).unwrap().as_deref(), Some("Cross Ta"));
+        assert_eq!(blocks.text(0, 1).unwrap().as_deref(), Some("Second"));
+        assert_eq!(blocks.text(0, 2).unwrap().as_deref(), Some("Introduction"), "up to the NUL");
+        assert_eq!(blocks.text(0, 3).unwrap().as_deref(), Some(""), "an empty field is empty");
+        assert_eq!(blocks.text(0, 8).unwrap(), None, "eight fields only");
+        assert_eq!(blocks.text(1, 0).unwrap(), None);
+        assert_eq!(blocks.data(0).unwrap().map(|d| d.len()), Some(1608));
+    }
 
     // A record data size below the eight fields is refused.
     let mut bad = cbl_file(&[]);
@@ -82,12 +89,16 @@ fn the_text_table_reads_records_from_the_end_of_the_file() {
     let db = TempDb::create("cbtt");
     db.write(".cbtt", &cbtt_file(4, 2, b"DESC", &[b"AAAA", b"BBBB"]));
 
-    let table = TextTable::open(&db.base()).unwrap();
-    assert_eq!(table.count(), 2);
-    assert_eq!(table.record_size(), 4);
-    assert_eq!(table.record(0).unwrap().as_deref(), Some(&b"AAAA"[..]));
-    assert_eq!(table.record(1).unwrap().as_deref(), Some(&b"BBBB"[..]));
-    assert_eq!(table.record(2).unwrap(), None);
+    // Scoped so `table` is dropped before the rewrite below — see the note in
+    // `text_blocks_read_their_fields` about `ERROR_USER_MAPPED_FILE` on Windows.
+    {
+        let table = TextTable::open(&db.base()).unwrap();
+        assert_eq!(table.count(), 2);
+        assert_eq!(table.record_size(), 4);
+        assert_eq!(table.record(0).unwrap().as_deref(), Some(&b"AAAA"[..]));
+        assert_eq!(table.record(1).unwrap().as_deref(), Some(&b"BBBB"[..]));
+        assert_eq!(table.record(2).unwrap(), None);
+    }
 
     // A count the file cannot hold is a truncation.
     db.write(".cbtt", &cbtt_file(4, 4, b"DESC", &[b"AAAA", b"BBBB"]));

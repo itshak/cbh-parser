@@ -90,15 +90,22 @@ fn cbj_file(record: u64, count: u32, moves: i64, annotations: i64) -> Vec<u8> {
 fn wide_offsets_extend_the_short_ones() {
     let db = TempDb::create("cbj");
     db.write(".cbj", &cbj_file(120, 1, 26, 0));
-    let wide = Wide::open(&db.base()).unwrap();
-    assert_eq!(wide.records(), 1);
-    assert_eq!(wide.offsets(1, (26, 0)).unwrap(), (26, 0));
-    assert_eq!(wide.offsets(0, (26, 0)).unwrap(), (26, 0), "the header record keeps its offsets");
-    assert_eq!(wide.offsets(2, (26, 0)).unwrap(), (26, 0), "past the records, ChessBase's defaults");
+    // Scoped so `wide` — and the mapping it holds — is dropped before the
+    // rewrite below. Windows refuses to write a file that still has an open
+    // user-mapped section (`ERROR_USER_MAPPED_FILE`, 1224), and `Wide::open`
+    // maps `.cbj`; Unix does not mind, so this test passed on both Unix CI
+    // operating systems and failed on the first Windows one.
+    {
+        let wide = Wide::open(&db.base()).unwrap();
+        assert_eq!(wide.records(), 1);
+        assert_eq!(wide.offsets(1, (26, 0)).unwrap(), (26, 0));
+        assert_eq!(wide.offsets(0, (26, 0)).unwrap(), (26, 0), "the header record keeps its offsets");
+        assert_eq!(wide.offsets(2, (26, 0)).unwrap(), (26, 0), "past the records, ChessBase's defaults");
 
-    match wide.offsets(1, (27, 0)).unwrap_err() {
-        Error::Corrupt { detail, .. } => assert!(detail.contains("disagree"), "{detail}"),
-        other => panic!("expected Corrupt, got {other:?}"),
+        match wide.offsets(1, (27, 0)).unwrap_err() {
+            Error::Corrupt { detail, .. } => assert!(detail.contains("disagree"), "{detail}"),
+            other => panic!("expected Corrupt, got {other:?}"),
+        }
     }
 
     // A record too short to hold the offsets is corrupt.
