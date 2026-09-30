@@ -47,6 +47,13 @@ impl DbFile {
         #[allow(unsafe_code)]
         let mmap = unsafe {
             let m = memmap2::MmapOptions::new().map(&file).ok();
+            // `memmap2::Advice` and `Mmap::advise` are `#[cfg(unix)]`. Behind a
+            // default-on feature the hint below used to be gated on the feature
+            // and not on the target, so the crate did not compile on Windows at
+            // all. The hint only tells the kernel we mean to read the mapping
+            // front to back, so dropping it where memmap2 has no equivalent
+            // costs nothing that any caller could observe.
+            #[cfg(unix)]
             if let Some(ref mmap) = m {
                 let _ = mmap.advise(memmap2::Advice::Sequential);
             }
@@ -188,10 +195,18 @@ pub fn with_extensions(stem: &Path, extensions: &[&str]) -> Vec<PathBuf> {
         .collect()
 }
 
+/// Reopens `file` from an already-open handle, keeping its file object.
+///
+/// Windows-only, and — before the `windows-latest` runner reached this tree —
+/// never compiled anywhere: a `#[cfg(windows)]` function that no CI job built.
+/// That is how a lint-clean Unix tree shipped a Windows build that did not
+/// compile. Every line of it is now covered by the `windows-latest` job.
 #[cfg(windows)]
+#[allow(unsafe_code)] // ReOpenFile is the only way to get a second read handle.
 fn reopen(file: &File) -> std::io::Result<File> {
     use std::os::windows::io::{AsRawHandle, FromRawHandle, RawHandle};
-    /// Reopens a file from an open handle, keeping its file object.
+    // A plain comment, not a doc comment: rustdoc does not document extern
+    // blocks, and `///` there is an `unused_doc_comments` warning.
     unsafe extern "system" {
         fn ReOpenFile(original: RawHandle, access: u32, share: u32, flags: u32) -> RawHandle;
     }

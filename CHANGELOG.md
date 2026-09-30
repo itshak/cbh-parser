@@ -5,7 +5,55 @@ All notable changes to **cbvault** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-The project is pre-1.0. The version below is the first published release.
+The project is pre-1.0.
+
+---
+
+## [0.1.1] - 2026-09-30
+
+A build fix, and a CI change that is the more important half of it.
+
+### Fixed
+
+- **`cbvault-format` did not compile on Windows.** `DbFile::open` called
+  `memmap2::Advice` behind the crate's default-on `mmap` feature, gated on the
+  feature and not on the target. `Advice` and `Mmap::advise` are `#[cfg(unix)]` in
+  `memmap2`, so on Windows the crate failed with `E0433: cannot find Advice in
+  memmap2` and `E0599: no method named advise found for &Mmap` and nothing
+  depending on it could be built. Found by BlindBase's `v0.4.3` release build on
+  `windows-x64`; the same release's `macos-arm64` job passed. The advisory
+  `Sequential` hint is now gated `#[cfg(unix)]`, so where `memmap2` offers no
+  equivalent the mapping is used as it is. No decoding, API, error or output
+  change on any platform, and no change at all on Unix.
+- **`DbFile::reopen` was lint-dirty.** Windows-only, and — with no Windows job in
+  CI — never compiled by anything. Its `unsafe extern "system"` block and two
+  `unsafe` blocks now carry `#[allow(unsafe_code)]` (each already has a `SAFETY`
+  comment), and the `///` on the extern block, which rustdoc does not document, is
+  a plain comment. Four warnings, zero now.
+
+### Changed
+
+- **CI runs on `windows-latest`.** Both operating systems were Unix, which is why
+  a green tree published a version that did not compile on one of the two desktop
+  platforms its only consumer ships: a Unix-only matrix cannot see a Unix-only
+  API, and every `#[cfg(windows)]` line in this crate was unbuilt by CI. The
+  Windows job compiles all targets, lints with `-D warnings`, runs the suite and
+  compiles the benchmarks, like the other two.
+- **The CI job's steps run under bash on all three platforms.** The toolchain
+  check uses bash parameter expansion and `sort -V`; PowerShell is the Windows
+  default and would have failed the job for a reason unrelated to the code.
+
+### Not changed
+
+- No format, decoding path, public API, error type or output byte.
+- No dependency added, removed or upgraded.
+- No benchmark-affecting change: the dropped call is an advisory hint, and it is
+  dropped only where it does not exist.
+
+### Provenance
+
+No new module and no third-party material. The two touched functions are already
+in `docs/provenance.md`.
 
 ---
 

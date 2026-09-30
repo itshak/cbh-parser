@@ -13,10 +13,24 @@ jobs:
   check-and-test:
     name: Check & Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    # Bash on every platform, including Windows. The toolchain check below uses
+    # bash parameter expansion and `sort -V`, and PowerShell would not run it —
+    # so without this the Windows job would fail on a shell difference rather
+    # than on anything about the code. Git Bash is present on `windows-latest`.
+    defaults:
+      run:
+        shell: bash
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        # `windows-latest` is not optional. `cbvault-format` 0.1.0 shipped with
+        # `memmap2::Advice` — a `#[cfg(unix)]` type — called behind a default-on
+        # feature without a target gate, so the crate did not compile on Windows
+        # at all. Both CI operating systems were Unix, so the tree was green and
+        # a published version was unusable on a platform BlindBase ships. A
+        # Unix-only matrix cannot see a Unix-only API; the platform a consumer
+        # builds on has to be a platform this job builds.
+        os: [ubuntu-latest, macos-latest, windows-latest]
         rust: [stable]
     steps:
       - uses: actions/checkout@v4
