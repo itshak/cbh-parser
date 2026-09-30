@@ -27,11 +27,19 @@
 - [x] 3.5 Listing a protected archive reads only the table
 - [x] 3.6 The differential test against the real sample, env-gated
 
-## 4. The compression modes
+## 4. The compression modes — **not closed, and not guessed**
 
 - [x] 4.1 Differential analysis on the oracle's extracted members
-- [x] 4.2 Implement a codec for any mode that is closed
-- [x] 4.3 Leave every unclosed mode a typed `CodecUnavailable`, documented
+- [x] 4.2 Ruled out: known compressors, byte-aligned LZ, a `0x00`-marker LZ, and
+      every fixed-size token grammar with a position-independent dictionary
+- [x] 4.3 No codec implemented — none of the three modes has a byte-exact
+      decoder, and a decoder that is nearly right is worse than none
+- [x] 4.4 Each mode stays a typed `CodecUnavailable`, with the evidence and the
+      next step recorded beside it
+
+The next step is in `docs/format-spec-cbv.md`: a size-*k* token's meaning
+depends on something beyond its own *k* bytes, so the state a decoder must
+carry between tokens is the open question.
 
 ## 5. Close out
 

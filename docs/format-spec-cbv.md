@@ -207,6 +207,25 @@ crack the codec, and the negative results are as useful as the positive ones.
    therefore not a plain byte-level LZ.
 3. **The recurring `03` at stream offset 4 is not a mode flag.** It is the mode
    byte's neighbourhood, and it is `0x00` for every stored member.
+4. **Not a "literal run, `0x00` means back-reference" LZ.** The control bytes
+   between literal runs are overwhelmingly `0x00` (33 of them in `small.ini`'s
+   498-byte body, the rest of the body's 107 distinct byte values looking like
+   the text they stand for), which suggests the obvious grammar. It is not
+   that grammar: deleting every `0x00` from `small.ini`'s body leaves **465**
+   bytes against a **663**-byte plaintext, and the two first diverge at offset
+   16, where the packed stream holds `Type =05itle=` and the plaintext holds
+   `Type=0\r\nTitle=`. A back-reference that emits `5` where the source has
+   `\r\nT` is not a copy at all, so the bytes are **transformed**, not merely
+   relocated.
+5. **Not a fixed-size token grammar with a position-independent dictionary.**
+   A lattice search over token sizes 1 and *k* (2..255), minimum match 2,
+   enforcing arc consistency — a size-*k* token's meaning must be a function of
+   its *k* byte values alone, checked globally across every member of both
+   sample archives — has **no byte-exact solution**. This is the strongest
+   negative result so far: it rules out the whole family of byte-oriented
+   grammars that a fixed dictionary would imply, and says the state carried
+   between tokens (a position-dependent code, or a Huffman/arithmetic stage
+   whose tables are themselves encoded) is what remains.
 
 ### What the modes look like
 
