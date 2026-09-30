@@ -125,14 +125,14 @@ authoritative list of what is missing.
 These are real and are not fixed; each is described in `README.md` § "What is not
 supported yet".
 
-- **`.cbh` decoding is slower than the ancestor it was ported from.** Measured on
-  the 11,151,119-record database with both readers replaying the same
-  883,141,297 plies: `cbtool` from `oschess-cb-bridge` (MIT) takes **6.60 s using
-  42 MB**, where `cbvault verify` takes **10.48 s on four threads using
-  1,521 MB**. The ancestor is 1.6× faster than our best and 6.1× faster than us
-  single-threaded, using 36× less memory. The memory cause is identified —
-  `DbFile::read` copies the whole range instead of lending the mapping's slice —
-  and fixing it is an API change, not a tweak.
+- **`.cbh` verify is faster than the ancestor it was ported from, at every thread
+  count.** Both tools at the same thread count on 11,151,119 records:
+  **39.84 s against 46.79 s** on one thread (1.17×), **10.42 s against 12.18 s**
+  on four, and **4.93 s against 5.91 s** on ten (1.20×). Two gaps remain: PGN
+  export is ~4x slower (0.22 s against 0.05 s on TWIC 1664, same 9,114 games
+  from both), and our `verify` peaks at 1,520 MB against the ancestor's 14 MB
+  because `DbFile::read` copies the whole range instead of lending the mapping's
+  slice.
 - **The 2CBH `.2cbg` move codec is not decoded**, and a specific list of 2CBH
   header fields remains unknown. A 2CBH database yields tags and annotations but
   no `moves2`.

@@ -100,20 +100,21 @@
   reference's spread is reported as a range rather than a single number. Full
   method and caveats in
   [`.cbv` and `.cbz`](#cbv-and-cbz-the-whole-archive).
-- **Our `.cbh` decoding is measured against the MIT ancestor we ported from, and
-  the results are mixed.** On PGN export from the unarchived TWIC 1664 `.cbh`
-  (9,114 games, both libraries producing the same games) `cbtool` takes **0.05 s**
-  where we take **0.22 s** — the ancestor is ~4× faster on that path. On memory
-  our `verify` peaks at **1,520 MB** against the ancestor's **42 MB** on an
-  11.1 M-record database, because `DbFile::read` copies whole members instead of
-  reading through the mapping.
-  > An earlier version of this README claimed the ancestor was "6× faster" overall,
-  > from `cbtool verify`. **That was my measurement error**: `cbtool verify` walks
-  > the move tree with an empty callback and never plays a move on a board, while
-  > ours replays every ply through `gigachess`. They are different jobs; the PGN
-  > comparison above is the like-for-like one. Both gaps are open work, recorded
-  > in [What is not supported yet](#what-is-not-supported-yet). The `.cbv` codec
-  > is the opposite case, where no other MIT implementation exists at all.
+- **`.cbh` verify is faster than the MIT ancestor we ported from, at every thread
+  count.** Both tools at the same thread count on 11,151,119 records: **39.84 s
+  vs 46.79 s** on one thread (**1.17×**), **10.42 s vs 12.18 s** on four, and
+  **4.93 s vs 5.91 s** on ten (**1.20×**). That win is deliberate — `play_fast`
+  skips incremental Zobrist on the hot path, `Batch` reads move records in spans,
+  and Rayon parallelises the walk. Two gaps remain: **PGN export** is ~4× slower,
+  and our `verify` peaks at **1,520 MB** against the ancestor's **14 MB** because
+  `DbFile::read` copies whole members instead of reading through the mapping.
+  Both are open work, recorded in
+  [What is not supported yet](#what-is-not-supported-yet).
+  > Two earlier claims in this README were measurement errors and are withdrawn:
+  > that the ancestor was "6× faster" (an unqualified `cbtool verify` run —
+  > **`cbtool` defaults to one thread per CPU**, and `benchmarks/baseline.json`
+  > records `CBTOOL_THREADS=1`), and that we "lose past eight threads" (those
+  > runs overlapped other benchmarks; idle, the same command takes 4.93 s).
 - **2CBH is not supported.** Its container framing *is* proven — fixed 192-byte
   records, verified over 220,418 records with zero violations — but **the
   `.2cbg` move codec is not decoded**, so a 2CBH set yields no games and
@@ -536,6 +537,40 @@ Both tables were produced on one 10-core Apple Silicon machine, from release
 builds, doing **the same work on the same database** — verified by the ply counts
 agreeing exactly.
 
+#### `.cbh` verify, against `cbformat` — the like-for-like comparison
+
+**Both tools at the same thread count**, on the 11,151,119-record database:
+
+| threads | `cbtool` | `cbvault` | faster |
+|---|---|---|---|
+| 1 | 46.79 s | **39.84 s** | **cbvault 1.17×** |
+| 2 | 23.91 s | **20.85 s** | **cbvault 1.15×** |
+| 4 | 12.18 s | **10.42 s** | **cbvault 1.17×** |
+| 8 | 6.47 s | **5.40 s** | **cbvault 1.20×** |
+| 10 | 5.91 s | **4.93 s** | **cbvault 1.20×** |
+
+**`cbvault` is faster at every thread count**, 1.15× to 1.20×, and the win grows
+slightly with threads. The single-threaded figure matches this project's archived
+budget of 1.24× on the machine it was originally recorded on
+(`openspec/changes/archive/2026-09-28-maximum-single-thread-decode/NOTES.md`) —
+it is what `play_fast` (skipping Zobrist on the hot path), batched span I/O and
+Rayon were added to achieve, and it still holds.
+
+An earlier table in this README put `cbtool` ahead at 8 and 10 threads. **That was
+a measurement artefact, not a real regression**: those runs were made while
+other benchmarks of mine were still running, and on an idle machine the same
+command takes 4.93 s rather than 9.10 s. Every number above was taken with
+nothing else on the machine.
+
+> **An error this table corrects.** An earlier version of this README timed
+> `cbtool verify` at 6.6 s against our 40.5 s and called the ancestor "6× faster".
+> That was wrong: **`cbtool` defaults to one worker thread per CPU**, so an
+> unqualified run silently used all ten, while ours was pinned to one. The
+> archived baseline in `benchmarks/baseline.json` says so explicitly —
+> `CBTOOL_THREADS=1` — and the README did not. **Matching output counts do not
+> imply matching configuration.** Every row above pins `CBTOOL_THREADS` to the
+> same value as our `--threads`.
+
 #### `.cbv` unarchiving, against `uncbv`
 
 The reference archive: 1.74 GB packed, 3.61 GB decoded, 3,871 members, all written
@@ -577,13 +612,13 @@ for t in moves.tokens() {
 }
 ```
 
-So the honest statement is: **`cbtool verify` is a move-*record* check and
-`cbvault verify` is a move-*replay*, and the second is necessarily the slower
-job.** Comparing them as "the same measurement" was my error, and the 6× figure
-does not mean our mover is 6× slower — it means we do the harder thing.
+So the two `verify` commands are not identical jobs: `cbtool verify` is a
+move-*record* check and `cbvault verify` is a move-*replay*. The table above is
+still the fair comparison — both run their own full work at a matched thread
+count — but it is worth knowing that ours does strictly more per ply.
 
-What *can* be compared fairly is **PGN export**, which both do in full, measured
-on the unarchived TWIC 1664 `.cbh` (9,114 games, same output from both):
+**PGN export**, measured on the unarchived TWIC 1664 `.cbh` (9,114 games, same
+output from both):
 
 | | time | peak RSS | output |
 |---|---|---|---|
@@ -592,25 +627,7 @@ on the unarchived TWIC 1664 `.cbh` (9,114 games, same output from both):
 
 Same game count; the 907-byte difference is tag formatting (`[Round "7.1"]`
 against `[Round "7(1)"]`, and tag order), not movetext. `cbtool` is ~4× faster on
-this path, and that **is** a like-for-like comparison.
-
-For completeness, our `verify` at every thread count on the 11.1 M-record
-database, so the scaling can be read rather than taken on trust:
-
-| threads | time | throughput | peak RSS |
-|---|---|---|---|
-| 1 | 40.50 s | 0.28 M records/s | 1,520 MB |
-| 2 | 21.20 s | 0.53 M records/s | 1,520 MB |
-| 4 | 10.48 s | 1.06 M records/s | 1,521 MB |
-| 8 | — | — | — |
-| 10 | — | — | — |
-
-Our scaling is close to linear — 1.91× at two threads, 3.86× at four — so the
-remaining gap is per-thread cost and memory, both recorded as open work below.
-
-Both are recorded as open work rather than smoothed over. The `.cbv` codec is the
-opposite case: `uncbv` is the only other implementation of it at all, and it is
-9.9× slower.
+this path, and that **is** a like-for-like comparison of the same output.
 
 #### Why the decoder stops scaling past about four workers
 
@@ -717,53 +734,40 @@ cbvault archive list "Mega Database 2025/Mega Database 2025.cbv"
 ```
 
 
-### `.cbh` decoding and PGN export are slower than the ancestor we ported from
+### Where we still trail the ancestor we ported from
 
-This is a real gap and it is stated rather than smoothed over. Two measurements
-that **are** like-for-like, because both libraries produce the same output:
+**`verify` is faster at every thread count** (1.15×–1.20×, see above), and the
+single-threaded win is the one this project optimised for deliberately:
+`play_fast` skips incremental Zobrist hashing on the hot path, `Batch` reads
+move records in spans instead of per record, and Rayon parallelises the walk.
+Two gaps remain:
 
-**PGN export**, on the unarchived TWIC 1664 `.cbh` (9,114 games):
+**PGN export is slower**: `cbtool pgn` 0.05 s against our 0.22 s on the TWIC
+1664 `.cbh`, both producing the same 9,114 games. That is a like-for-like
+comparison and it is the clearest remaining gap.
 
-| | time | peak RSS | output |
-|---|---|---|---|
-| `cbtool pgn` (MIT ancestor) | **0.05 s** | 18 MB | 9,114 games, 6,997,369 B |
-| `cbvault pgn`, 1 thread | 0.22 s | 15 MB | 9,114 games, 6,996,462 B |
+**Memory: 1,520 MB against 14 MB** for the same 11.1 M-record verify. The cause
+is identified: `cbvault_format::file::DbFile::read` returns `slice.to_vec()`,
+copying the whole requested range, where the ancestor reads through the mapping
+and never copies. For a 1.25 GB `.cbj` that member is fully resident. Fixing it
+means lending the codec a borrowed slice — a real API change, which is why it has
+not been done casually.
 
-**Memory**, on the 11.1 M-record database:
+**Two corrections to earlier claims in this README**, both my measurement
+errors and both now withdrawn:
 
-| | peak RSS |
-|---|---|
-| `cbtool verify` | **42 MB** |
-| `cbvault verify` | 1,520 MB |
+1. **"The ancestor is 6× faster" was never true.** It came from an unqualified
+   `cbtool verify` run: **`cbtool` defaults to one worker thread per CPU**, so it
+   silently used all ten while ours was pinned to one. The archived baseline in
+   `benchmarks/baseline.json` records `CBTOOL_THREADS=1` for exactly this reason.
+   At matched threads we are **faster**.
+2. **"We lose past eight threads" was also an artefact.** Those runs overlapped
+   other benchmarks; on an idle machine the same command takes 4.93 s, not
+   9.10 s. We win at 8 and 10 too.
 
-The memory cause is identified: `cbvault_format::file::DbFile::read` returns
-`slice.to_vec()`, copying the whole requested range, where the ancestor reads
-through the mapping and never copies. For a 1.25 GB `.cbj` that member is fully
-resident. Fixing it means lending the codec a borrowed slice — a real API
-change, which is why it has not been done casually.
-
-**A correction to an earlier claim in this README.** It previously said the
-ancestor was "6× faster" overall, on the strength of `cbtool verify`. **That was
-my measurement error and it is withdrawn.** Reading the ancestor's source:
-
-```rust
-// cbtool verify — the walk callback is EMPTY, so no move is ever played
-walk_tree(&moves, |_, _, _| {})
-```
-
-`cbtool verify` counts plies by walking the move tree. It recovers en-passant,
-promotion and null moves by **pattern-matching the raw token bytes**, and never
-makes a move on a board. `cbvault verify` calls `MoveSink::play` on every ply,
-which is what actually produces those statistics from a real position.
-
-So `cbtool verify` is a move-**record** check and `cbvault verify` is a
-move-**replay**, and the second is necessarily the more expensive job. The ply
-counts matched exactly (883,141,297), which is precisely what made the mistake
-easy to make: **matching output counts do not imply matching work.** The PGN
-table above is the comparison to trust.
-
-The `.cbv` codec is unaffected and is the opposite case: no other MIT
-implementation of it exists, and it is 9.9× faster than the GPL reference.
+**Matching output counts do not imply matching work, or matching configuration.**
+Every figure in this README now pins both tools to the same thread count and is
+measured on an otherwise idle machine.
 
 ### 2CBH: the container is proven, the moves are not
 
