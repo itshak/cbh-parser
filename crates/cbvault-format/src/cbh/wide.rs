@@ -64,7 +64,12 @@ impl Wide {
             return Ok((u64::from(short.0), u64::from(short.1)));
         }
         let at = HEADER + self.record * u64::from(id - 1);
-        let r = self.file.read(at, MIN_RECORD as usize)?;
+        // Into a stack buffer rather than `read`, which allocates. This is
+        // called once per record over the whole database — 11 million times on
+        // the reference set — so the `Vec` it used to build was 11 million
+        // short-lived allocations on the hottest path in the `.cbj` reader.
+        let mut r = [0u8; MIN_RECORD as usize];
+        self.file.read_exact(at, &mut r)?;
         let long = |o: usize| i64::from_be_bytes(r[o..o + 8].try_into().unwrap_or_default());
         let (moves, annotations) = (long(0x1e), long(0x0c).max(0));
         let agrees = |wide: i64, short: u32| wide >= 0 && wide as u64 & 0xffff_ffff == u64::from(short);

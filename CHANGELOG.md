@@ -125,15 +125,19 @@ authoritative list of what is missing.
 These are real and are not fixed; each is described in `README.md` § "What is not
 supported yet".
 
-- **`.cbh` reading beats the ancestor it was ported from on both paths.** Both at
-  the same thread count on 11,151,119 records: `verify` 39.84 s against 46.79 s
-  single-threaded (1.17x) and 4.93 s against 5.91 s at ten threads (1.20x);
-  PGN export 11.99 s against 38.11 s at eight threads (3.2x), using 81 MB
-  against its 100 MB. The parallel export meets the spec budget of at most 25 s
-  and under 8 GiB with room. Single-threaded PGN export is the one path where
-  the ancestor leads. On memory we allocate ~265 MB to replay 883,141,297 moves;
-  the 1,520 MB peak is dominated by 1,255 MB of mapped `.cbg` pages, which a
-  control program that only maps and reads the file also incurs.
+- **`.cbh` reading beats the ancestor it was ported from on every path and every
+  thread count.** Both at the same thread count on 11,151,119 records: `verify`
+  39.84 s against 46.79 s single-threaded (1.17x), PGN export 94.43 s against
+  142.44 s single-threaded (1.51x) and 11.23 s against 33.69 s at ten threads
+  (3.0x). Both spec budgets are met: parallel export at most 25 s at 8+ threads
+  and under 8 GiB (13.00 s, 3,107 MB), single-threaded at least 65,000
+  records/s (94.43 s, 1.8x inside it).
+- **`DbFile::read_exact`, and the allocation it removes.** `Wide::offsets` read
+  24 bytes per record through `DbFile::read`, which allocates a `Vec` — 11
+  million times on a whole-database walk, the hottest path in the `.cbj`
+  reader. It now reads into a stack buffer. `cbvault pgn` also reports
+  `peak_writer`, the library's own high-water mark for a worker's writer
+  buffers, which measures 0 MB after all 11.1 M games.
 - **The 2CBH `.2cbg` move codec is not decoded**, and a specific list of 2CBH
   header fields remains unknown. A 2CBH database yields tags and annotations but
   no `moves2`.

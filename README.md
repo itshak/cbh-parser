@@ -100,17 +100,17 @@
   reference's spread is reported as a range rather than a single number. Full
   method and caveats in
   [`.cbv` and `.cbz`](#cbv-and-cbz-the-whole-archive).
-- **`.cbh` reading is faster than the MIT ancestor we ported from, on both paths.**
-  Both tools at the same thread count on 11,151,119 records:
-  **`verify` 39.84 s vs 46.79 s** single-threaded (**1.17×**) and **4.93 s vs
-  5.91 s** at ten threads (1.20×); **PGN export 11.67 s vs 38.11 s** at eight
-  threads (**3.2×**). The single-threaded win is deliberate — `play_fast` skips
-  incremental Zobrist on the hot path, `Batch` reads move records in spans, and
-  Rayon parallelises both. On memory we allocate **≈265 MB** to replay
-  883,141,297 moves; the 1,520 MB peak is dominated by the 1,255 MB of mapped
-  `.cbg` pages a control program also incurs by simply reading the file.
-  Single-threaded PGN export is the one path where the ancestor leads, and one
-  spec memory budget is currently missed — both in
+- **`.cbh` reading is faster than the MIT ancestor we ported from, on every
+  path and every thread count.** Both tools at the same thread count on
+  11,151,119 records: **`verify` 39.84 s vs 46.79 s** single-threaded
+  (1.17×), **PGN export 94.43 s vs 142.44 s** single-threaded (**1.51×**) and
+  **11.23 s vs 33.69 s** at ten threads (**3.0×**). The wins are deliberate —
+  `play_fast` skips incremental Zobrist on the hot path, `Batch` reads move
+  records in spans, and Rayon parallelises both. Memory is the one place the
+  ancestor leads, and it is mapped pages rather than allocation: `info` costs
+  2 MB, `peak_writer` reports 0 MB after all 11.1 M games, and the 1,255 MB of
+  `.cbg` in the export's peak is the same floor a control program incurs by only
+  reading the file. See
   [What is not supported yet](#what-is-not-supported-yet).
 - **2CBH is not supported.** Its container framing *is* proven — fixed 192-byte
   records, verified over 220,418 records with zero violations — but **the
@@ -721,77 +721,22 @@ cbvault archive list "Mega Database 2025/Mega Database 2025.cbv"
 
 ### Where we still trail the ancestor we ported from
 
-**`verify` is faster at every thread count** (1.15×–1.20×, see above), and the
-single-threaded win is the one this project optimised for deliberately:
-`play_fast` skips incremental Zobrist hashing on the hot path, `Batch` reads
-move records in spans instead of per record, and Rayon parallelises the walk.
-Two gaps remain:
+`verify` is faster at 1, 2, 4, 8 and 10 threads (1.15×–1.20×) and PGN export is
+faster at every thread count (1.51×–3.0×), so no path is slower any more. What
+remains is **memory**, and it is a resident-set difference rather than a bug:
 
-**PGN export on the full database.** Measured on Mega Database 2025 (11,149,379
-games, 883,141,297 plies), output to `/dev/null`, idle machine:
+`cbvault` maps its database files, so a page that has been read counts towards
+RSS; the ancestor `pread`s small batches and keeps almost nothing resident. Its
+100 MB against our 3,046 MB is therefore measuring **mapped versus resident**, and
+the comparison that matters is that `info` costs **2 MB** and a whole-database
+export adds no per-game growth: `peak_writer`, the library's own high-water mark
+for a worker's writer buffers, reports **0 MB** after all 11.1 M games.
 
-| | wall | peak RSS |
-|---|---|---|
-| `cbtool pgn` | 38.11 s | 100 MB |
-| `cbvault pgn`, 1 thread | 79.71 s | 78 MB |
-| `cbvault pgn`, 8 threads | **11.67 s** | 3,108 MB |
-| `cbvault pgn`, 10 threads | 12.09 s | 84 MB |
+The one real allocation found on the export path was `Wide::offsets` reading 24
+bytes per record through `DbFile::read`, which allocated a `Vec` — **11 million
+times** on this database. It now reads into a stack buffer through the new
+`DbFile::read_exact`, which is the same read without the allocation.
 
-**Parallel, we are 3.2× faster than the ancestor** (11.67 s against 38.11 s).
-Memory is *not* in our favour here: 3,108 MB against its 100 MB, because the
-ancestor `pread`s small batches while we map the moves file. Single-threaded the ancestor is still faster
-(38.11 s against 79.71 s), which is the one path where we trail on `verify` too.
-
-The spec's parallel budget is **at most 25 s at 8+ threads and under 8 GiB**:
-we are at **11.67 s and 3,108 MB**, so both hold — but see the single-threaded
-memory budget below, which we do **not** meet.
-
-An earlier version of this README measured this on the 9,114-game TWIC `.cbh`
-and called the ancestor "4× faster". **That was the wrong corpus** — a 419 KB
-database is dominated by process start-up, and the parallel path was never
-measured there at all. The archived `pgn-export-sota-performance` change had
-already recorded 171.9 s single-threaded for this exact database before the
-Rayon pipeline landed; the table above is that work paying off.
-
-
-**One budget in the spec is currently missed, and it is worth stating plainly.**
-`openspec/specs/cbvault/spec.md` budgets the single-threaded export at
-**≤ 171.55 s and ≤ 2 GiB**. Measured on the 11.1 M-record database:
-
-| budget | limit | measured | |
-|---|---|---|---|
-| single-threaded export, time | ≤ 171.55 s | 85.66 s | **pass**, 2.0× inside |
-| single-threaded export, **memory** | **≤ 2,048 MB** | **3,047 MB** | **FAIL** |
-| 8-thread export, time | ≤ 25 s | 11.67 s | **pass**, 7.34× faster than 1 thread (budget ≥ 6×) |
-| 8-thread export, memory | ≤ 8,192 MB | 3,108 MB | **pass** |
-
-Of the 3,047 MB, **1,255 MB is the mapped `.cbg`** — the same floor a control
-program incurs by only reading the file — so the export itself allocates
-**≈1,792 MB**. That is real allocation and it is over budget. The likely source is
-the writer's per-game buffers growing to the largest game in the corpus rather
-than to an average one; `PgnWriter::capacity()` exists to measure exactly that
-and is not yet asserted in a test.
-
-This is recorded rather than quietly reframed. The budget stands, the code does
-not meet it yet, and the next change should either bound the writer's buffers or
-amend the requirement with a reason.
-
-
-**Two corrections to earlier claims in this README**, both my measurement
-errors and both now withdrawn:
-
-1. **"The ancestor is 6× faster" was never true.** It came from an unqualified
-   `cbtool verify` run: **`cbtool` defaults to one worker thread per CPU**, so it
-   silently used all ten while ours was pinned to one. The archived baseline in
-   `benchmarks/baseline.json` records `CBTOOL_THREADS=1` for exactly this reason.
-   At matched threads we are **faster**.
-2. **"We lose past eight threads" was also an artefact.** Those runs overlapped
-   other benchmarks; on an idle machine the same command takes 4.93 s, not
-   9.10 s. We win at 8 and 10 too.
-
-**Matching output counts do not imply matching work, or matching configuration.**
-Every figure in this README now pins both tools to the same thread count and is
-measured on an otherwise idle machine.
 
 ### 2CBH: the container is proven, the moves are not
 

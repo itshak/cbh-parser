@@ -105,6 +105,20 @@ impl DbFile {
         self.file.metadata().map(|m| m.len()).map_err(|source| Error::Io { path: self.path.to_path_buf(), source })
     }
 
+    /// The bytes at `offset` as a length-prefixed value, into `buf`.
+    ///
+    /// This is [`DbFile::read_into`] for a caller that already has a buffer,
+    /// which is what the hot paths use: a whole-database walk makes tens of
+    /// millions of small reads, and [`DbFile::read`] allocates a `Vec` per
+    /// call for each one. `Wide::offsets` reads 24 bytes per record — 11 million
+    /// times on the reference database — and that allocation was real even
+    /// though it was never large at once.
+    ///
+    /// A short read leaves `buf` untouched and reports [`Error::Truncated`].
+    pub fn read_exact(&self, offset: u64, buf: &mut [u8]) -> Result<()> {
+        self.read_into(offset, buf)
+    }
+
     /// The file's path, for diagnostics.
     pub fn path(&self) -> &Path {
         &self.path

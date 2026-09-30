@@ -502,15 +502,27 @@ fn run_pgn(mut args: impl Iterator<Item = String>) -> Result<bool, Box<dyn std::
     // The PGN itself went to the stream, so a report on stdout would corrupt it.
     // The report therefore always goes to stderr, and stdout stays pure PGN
     // whether or not `--json` was asked for.
+    //
+    // `peak_writer` is this library's own answer to "how much does it allocate?":
+    // the high-water mark of one worker's writer buffers, so a database export
+    // can be shown to hold one game's worth rather than a database's. Reported
+    // because the spec budgets it, and a budget nobody can see is a budget
+    // nobody can check.
     if json {
         eprintln!(
-            "{{\"records\":{},\"games\":{},\"guiding_texts\":{},\"bytes\":{},\"seconds\":{secs:.2},\"failures\":{}}}",
-            stats.records, stats.games, stats.texts, stats.bytes, stats.failures
+            "{{\"records\":{},\"games\":{},\"guiding_texts\":{},\"bytes\":{},\"seconds\":{secs:.2},\
+             \"failures\":{},\"peak_writer_bytes\":{},\"threads\":{threads}}}",
+            stats.records, stats.games, stats.texts, stats.bytes, stats.failures, stats.peak_writer
         );
     } else {
         eprintln!(
-            "exported {} games ({} records, {} bytes) in {secs:.1} s, {} failures",
-            stats.games, stats.records, stats.bytes, stats.failures
+            "exported {} games ({} records, {} bytes) in {secs:.1} s, {} failures, \
+             peak writer buffer {} MB",
+            stats.games,
+            stats.records,
+            stats.bytes,
+            stats.failures,
+            stats.peak_writer / (1 << 20)
         );
     }
 
