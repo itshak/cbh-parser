@@ -252,6 +252,41 @@ Other measured facts:
 - **The four varying bytes of the per-block head** — not CRC-32, Adler-32 or a
   32-bit sum (all excluded). Probably a checksum of the block; unverified.
 
+### What the smallest high-expansion member looks like
+
+`.cbl` is the cheapest place to work, and it has been measured: **4,416 tokens →
+29,138 bytes, a 6.60× expansion.** Aligning the token stream against the known
+plaintext:
+
+| | |
+|---|---|
+| positions where the token **is** the next plaintext byte (a literal) | 265 |
+| positions where it is **not** (a command) | 232 (**46.7 %**) |
+| longest literal run | **10 bytes** |
+
+So literals and commands are near-equal in frequency — this is not an
+"LZ-with-occasional-matches" scheme, it is a genuinely mixed token stream.
+
+**And the commands are copying zeros.** Almost every command site sits at the
+start of a run of zero bytes. The reason is visible in the member itself:
+
+```
+.cbl: 29,138 bytes, 12,816 of them zero (44.0 %)
+      1,919 zero runs; the longest are 1,376, 1,376, 1,181, 1,181, 271, 271
+      10,783 bytes (37.0 %) sit inside runs of four or more zeros
+```
+
+A 1,376-byte zero run is what turns 4,416 tokens into 29,138 bytes. **So the
+highest-value target is the back-reference *length* encoding, not the
+distance** — distance is almost always the same recent position when the target
+is a run of a single repeated byte. An implementation that guesses the length
+field first, and validates it against the known 1,376 and 1,181 runs in `.cbl`,
+has a strong oracle for the whole grammar.
+
+This also reframes the mode-`0x03` problem usefully: the members with the
+highest expansion (`.cbm` at 12.58×, `.cbl` at 6.60×) are the ones with the most
+padding, and they are the *easiest*, not the hardest — the arithmetic collapses.
+
 ### The three cheapest discriminating tests
 
 1. **Recover the back-reference grammar from the smallest high-expansion
