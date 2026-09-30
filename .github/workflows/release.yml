@@ -106,6 +106,10 @@ jobs:
           done
           echo "Publish order: $order"
           echo "ORDER=$order" >> $GITHUB_OUTPUT
+          # The first crate in a topological order is the one with no
+          # intra-workspace dependencies, and therefore the only one that can be
+          # packaged before anything is published. "Package Check" needs this.
+          echo "ORDER_ROOT=${order%% *}" >> $GITHUB_OUTPUT
       - name: Extract changelog for this version
         id: changelog
         run: |
@@ -122,14 +126,34 @@ jobs:
       - name: Verify Tests Pass
         run: cargo test --all-features
 
-      - name: Dry-Run Publish
+      - name: Package Check
         run: |
-          VERSION="${{ steps.version.outputs.VERSION }}"
-          for crate in ${{ steps.order.outputs.ORDER }}; do
-            echo "::group::Dry-run $crate $VERSION"
-            cargo publish -p "$crate" --dry-run
-            echo "::endgroup::"
-          done
+          # Packaging alone cannot be validated here for every crate, and the
+          # reason is worth recording because it broke the v0.1.0 release.
+          #
+          # `cargo package` and `cargo publish --dry-run` both resolve a crate's
+          # dependencies **from the registry** before doing anything else. In a
+          # workspace whose crates depend on each other, the second crate in a
+          # topological order therefore fails with
+          #
+          #   no matching package named `cbvault-format` found
+          #
+          # because its sibling is not published yet. That is the registry
+          # correctly reporting a missing dependency, not a broken crate, and
+          # neither `--no-verify` nor `--allow-dirty` helps because resolution
+          # happens first.
+          #
+          # So the pre-publish check is the one that needs no registry: does the
+          # dependency-free root of the order package? That is `cbvault-format`
+          # here, and it is a real check rather than a formality - it is the
+          # crate most likely to have a packaging problem and its artifact is
+          # what every other crate is built against. The dependent crates are
+          # verified where resolution is actually possible: inside the publish
+          # loop below, by `--dry-run` immediately before each upload, once
+          # that crate's dependencies are live in the index.
+          echo "::group::Package ${{ steps.order.outputs.ORDER_ROOT }}"
+          cargo package -p "${{ steps.order.outputs.ORDER_ROOT }}" --allow-dirty
+          echo "::endgroup::"
       - name: Publish to crates.io
         run: |
           if [ -z "${{ secrets.CARGO_REGISTRY_TOKEN }}" ]; then
@@ -173,6 +197,11 @@ jobs:
               continue
             fi
             echo "::group::Publishing $crate $VERSION"
+            # The dry run lives *here* rather than before the loop, because this
+            # is the first moment at which this crate's dependencies can resolve.
+            # Every earlier attempt to dry-run the whole order up front failed on
+            # the second crate; see "Package Check".
+            cargo publish -p "$crate" --dry-run
             cargo publish -p "$crate"
             echo "::endgroup::"
             wait_for_index "$crate" "$VERSION"
