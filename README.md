@@ -719,18 +719,69 @@ cbvault archive list "Mega Database 2025/Mega Database 2025.cbv"
 ```
 
 
+**PGN export on the full database.** Both tools at the same thread count, on
+Mega Database 2025 (11,149,379 games, 883,141,297 plies), output to `/dev/null`,
+idle machine:
+
+| threads | `cbtool` | `cbvault` | faster | `cbtool` RSS | `cbvault` RSS |
+|---|---|---|---|---|---|
+| 1 | 142.44 s | **94.43 s** | **cbvault 1.51×** | 74 MB | 3,044 MB |
+| 2 | 67.18 s | **40.57 s** | **cbvault 1.66×** | 76 MB | 3,056 MB |
+| 4 | 42.61 s | **21.22 s** | **cbvault 2.01×** | 80 MB | 3,070 MB |
+| 8 | 31.90 s | **13.00 s** | **cbvault 2.45×** | 98 MB | 3,107 MB |
+| 10 | 33.69 s | **11.23 s** | **cbvault 3.00×** | 101 MB | 3,125 MB |
+
+**`cbvault` is faster at every thread count**, from 1.51× single-threaded to 3.0×
+at ten. Both spec budgets are met: the parallel one (**at most 25 s at 8+
+threads, under 8 GiB**) at 13.00 s and 3,107 MB; the single-threaded one (**at
+least 65,000 records/s**, i.e. at most 171.55 s) at 94.43 s, 1.8× inside it.
+
+This is the archived `pgn-export-sota-performance` work paying off: that change
+recorded **171.9 s** single-threaded for exactly this database before the Rayon
+pipeline and the zero-alloc formatting landed.
+
+Two claims in earlier versions of this README were wrong, both from the same
+mistake — **an unqualified `cbtool` run defaults to one thread per CPU**, so
+every ancestor figure must be pinned with `CBTOOL_THREADS` to compare against a
+`--threads` value:
+
+- "the ancestor is 38.11 s, 2.5× faster than us" was a ten-core number against
+  our one-thread run. Pinned, it is **142.44 s** and we are faster.
+- "single-threaded PGN export is the one path where the ancestor leads" is also
+  wrong: **we lead there too, by 1.51×**.
+
+
 ### Where we still trail the ancestor we ported from
 
 `verify` is faster at 1, 2, 4, 8 and 10 threads (1.15×–1.20×) and PGN export is
 faster at every thread count (1.51×–3.0×), so no path is slower any more. What
 remains is **memory**, and it is a resident-set difference rather than a bug:
 
-`cbvault` maps its database files, so a page that has been read counts towards
-RSS; the ancestor `pread`s small batches and keeps almost nothing resident. Its
-100 MB against our 3,046 MB is therefore measuring **mapped versus resident**, and
-the comparison that matters is that `info` costs **2 MB** and a whole-database
-export adds no per-game growth: `peak_writer`, the library's own high-water mark
-for a worker's writer buffers, reports **0 MB** after all 11.1 M games.
+`cbvault` maps its database files, so a mapped page that has been read counts
+towards RSS; the ancestor has **no mmap dependency at all** and `pread`s into
+caller buffers, so its resident set stays at the size of those buffers. Measured
+directly, on the same work:
+
+| | peak RSS |
+|---|---|
+| `cbtool verify`, 1 thread | **13–14 MB** |
+| `cbvault verify`, 1 thread | 1,520 MB |
+| `cbtool info` / `cbvault info` | 2 MB / 2 MB |
+| **`cat .cbg > /dev/null`** (reads all 1.25 GB, no mapping) | **1 MB** |
+
+That last row is the important control: a process that reads the entire 1.25 GB
+moves file shows **1 MB** of RSS, because file-backed pages of a read are the
+**page cache**, not the process's memory, and they are evicted under pressure
+rather than swapped. So our 1,520 MB is the same file-backed page cache —
+evictable, shared between processes, and not ours to hold — while the ancestor's
+14 MB is genuine, private, resident allocation.
+
+**This is a real trade-off, and it costs us time as well as memory.** Mapping
+should be faster than `pread`, and on this machine it is: 39.5 s against 46.3 s
+single-threaded, a **1.17×** win that holds on a second warm pass. What the
+mapping does not give us is a smaller *resident* footprint, because the kernel
+counts the pages in whichever process touches them. A reader that wants a low RSS
+should `pread` in windows, and this reader does not.
 
 The one real allocation found on the export path was `Wide::offsets` reading 24
 bytes per record through `DbFile::read`, which allocated a `Vec` — **11 million

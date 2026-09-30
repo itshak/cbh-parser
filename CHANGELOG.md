@@ -131,7 +131,18 @@ supported yet".
   142.44 s single-threaded (1.51x) and 11.23 s against 33.69 s at ten threads
   (3.0x). Both spec budgets are met: parallel export at most 25 s at 8+ threads
   and under 8 GiB (13.00 s, 3,107 MB), single-threaded at least 65,000
-  records/s (94.43 s, 1.8x inside it).
+  records/s (94.43 s, 1.8x inside it). Memory is the one place the ancestor
+  leads, and it is mapped pages rather than allocation: `cbtool` has no mmap
+  dependency and preads into caller buffers, so it holds 13-14 MB where we hold
+  1,520 MB of which `cat .cbg > /dev/null` shows 1 MB is accounted as the page
+  cache rather than resident memory.
+- **Memory clarified against the ancestor's, by measurement rather than
+  inference.** The ancestor has no `mmap` dependency and `pread`s, so its
+  resident set is its buffers: 13-14 MB against our 1,520 MB. A control
+  (`cat .cbg > /dev/null`, reading all 1.25 GB) measures 1 MB, which shows the
+  pages are file-backed and evictable rather than ours. The mapping still wins on
+  time - 39.5 s against 46.3 s single-threaded - so this is a trade-off, not a
+  defect.
 - **`DbFile::read_exact`, and the allocation it removes.** `Wide::offsets` read
   24 bytes per record through `DbFile::read`, which allocates a `Vec` — 11
   million times on a whole-database walk, the hottest path in the `.cbj`

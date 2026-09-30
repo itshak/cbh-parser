@@ -331,8 +331,12 @@ The `.cbv` codec is the one place this project is ahead of everything that
 exists, because `uncbv` is the only other implementation of it. The `.cbh`
 reader is measured against the MIT ancestor it was ported from, both tools at
 the same thread count: **we win at every thread count** (39.84 s vs 46.79 s
-single threaded, 10.42 s vs 12.18 s at four, 4.93 s vs 5.91 s at ten), with our
-peak memory at 1,520 MB against the ancestor's 14 MB. An earlier measurement here
+single threaded, 10.42 s vs 12.18 s at four, 4.93 s vs 5.91 s at ten). PGN export
+is faster at every thread count too (94.43 s vs 142.44 s at one, 11.23 s vs
+33.69 s at ten). Our peak memory is 1,520 MB against the ancestor's 13-14 MB,
+which is a mapped-pages difference rather than allocation: the ancestor preads
+and holds only its buffers, while `cat .cbg > /dev/null` measures 1 MB for a
+process that reads the whole 1.25 GB. An earlier measurement here
 claimed the ancestor was 6x faster; that was wrong because `cbtool` defaults to
 one thread per CPU and the comparison was not thread-matched.
 `benchmarks/baseline.json` records `CBTOOL_THREADS=1` for exactly this reason.
