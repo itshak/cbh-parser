@@ -165,6 +165,38 @@ impl Scratch {
     pub(crate) fn put_stage(&mut self, stage: Vec<u8>) {
         self.stage = stage;
     }
+
+    /// Hands the caller's output buffer back to the allocator when it grew past
+    /// [`Self::KEEP`], in place.
+    ///
+    /// This is the fix for a plateau that looked like hardware. Holding a
+    /// buffer's capacity across members is what makes extraction
+    /// allocation-free, and for the 3,868 small members of the reference archive
+    /// it is exactly right. It is wrong for the three that hold 86 % of the
+    /// bytes: each worker that decodes one of the 1.25 GB members ends up
+    /// holding 1.25 GB, and with ten workers that is ten of them, which measured
+    /// as a 6.2 GB peak and **400,000 page reclaims per run** — and the run got
+    /// *slower* past four workers rather than faster.
+    ///
+    /// `shrink_to_fit` on an oversized buffer is a deallocation, not a copy, so
+    /// this costs nothing beyond the page reclaim it avoids. Releasing *below*
+    /// the threshold would undo the allocation-free property for every small
+    /// member, so the value sits above anything a small member reaches: the
+    /// largest `.cbl`/`.cbp`/`.cbt` in the reference archive is a few MB.
+    pub(crate) fn release_oversized(out: &mut Vec<u8>) {
+        if out.capacity() > Self::KEEP {
+            out.shrink_to_fit();
+        }
+    }
+
+    /// The buffer size above which capacity is handed back to the allocator.
+    ///
+    /// 64 MB. Above it the buffer belongs to one of a handful of huge members
+    /// and holding it starves the other workers of memory bandwidth and page
+    /// cache; below it the buffer is reused by thousands of small members and
+    /// freeing it would be pure churn. Measured, not guessed — see
+    /// [`Self::release_oversized`].
+    pub(crate) const KEEP: usize = 64 << 20;
 }
 
 /// One block's head: the payload's length and the unnamed word.

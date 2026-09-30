@@ -531,9 +531,10 @@ Decode-only, which measures the codec rather than the disk: 13.43 s single
 threaded (269 MB/s) and 6.81 s at 10 workers (530 MB/s). That is **≈9.9× faster
 than the reference process** end to end.
 
-### Why the codec stops scaling past two workers
+### Why the codec stops scaling past about four workers
 
-Decode-only, with the work handed out largest-first through a shared cursor:
+**It is the shape of the data, not the codec and not the machine.** Decode-only,
+work handed out largest-first through one shared cursor:
 
 | workers | seconds | MB/s | speedup | efficiency |
 |---|---|---|---|---|
@@ -543,34 +544,35 @@ Decode-only, with the work handed out largest-first through a shared cursor:
 | 8 | 6.16 | 585 | 2.18× | 27 % |
 | 10 | 6.21 | 581 | 2.16× | 22 % |
 
-**It is the machine, and that was measured rather than assumed.** Two controls
-on the same host:
+Reading the pool out of the mapping scales to **55 GB/s**, so neither the disk nor
+the file read is the limit. A bare `memcpy` plateaus at 40 GB/s, well above the
+decoder's output rate, so raw bandwidth is not the ceiling either.
 
-| | 1 worker | 2 | 4 | 8 |
-|---|---|---|---|---|
-| decode, nothing written | 269 MB/s | 525 MB/s | 581 MB/s | 585 MB/s |
-| reading the pool out of the mapping | 7.0 GB/s | 48 GB/s | 56 GB/s | 51 GB/s |
-| plain `memcpy`, no codec at all | 9.5 GB/s | 25 GB/s | 40 GB/s | 41 GB/s |
+**The cause is three enormous members.** Three of the archive's 3,871 members hold
+**3.10 GB of its 3.61 GB** — `.cbj` and `.cbg` at 1.25 GB each, `.cbh` at 512 MB.
+Each is one indivisible unit of work, so **the longest single member bounds the
+run** however many threads are added. Ten threads do not divide a 1.25 GB member
+ten ways; they decode it once and then idle. That is what the falling efficiency
+column shows — the extra threads are not slower, they have run out of work. A
+corpus of evenly sized members would keep scaling past four.
 
-I/O scales to 55 GB/s, so neither the disk nor the file read is the limit.
-**A bare `memcpy` — the same shape of traffic with none of the codec in it —
-plateaus in the same place**, and the decoder plateaus at roughly the absolute
-throughput two threads can push. The decoder is moving its output through the
-same memory system, so at two workers it is already at the bandwidth available,
-and more workers cannot buy bandwidth that is not there.
+Three corrections this produced, each of which changed the code or the claim:
 
-Two corrections fell out of this, and both are worth recording:
-
-- **The earlier decode-only benchmark was measuring itself, not the codec.** It
-  gave each worker a fixed round-robin slice (`i % workers`), which on this
-  corpus is close to the worst assignment: the two 1.25 GB members land on
-  whichever workers their indices select modulo the count, and one unlucky
-  worker finishing last sets the wall clock. Dynamic largest-first scheduling
-  through one atomic cursor is what removes the tail.
-- **Two workers is the knee, and that is the actionable result.** Past two the
-  decode gains about 10 %, and past four the extraction's own 3.61 GB write
-  flattens it too. A default above four buys nothing on this workload, so the
-  sensible default is four, not the core count.
+- **The earlier decode-only benchmark was measuring itself.** It gave each worker
+  a fixed round-robin slice (`i % workers`), which on this corpus is close to the
+  worst assignment: the two 1.25 GB members land on whichever workers their
+  indices select modulo the count, and one unlucky worker finishing last sets the
+  wall clock. Dynamic largest-first scheduling through one atomic cursor removes
+  the tail.
+- **An oversized output buffer is now released rather than carried.** Holding
+  capacity is right for the 3,868 small members and wrong for the three huge ones,
+  so a buffer above `Scratch::KEEP` (64 MB) is handed back after the member is
+  written. Measured on full extraction: 6 workers 7.65 s → **6.99 s**, 8 workers
+  7.63 s → **6.91 s**, 10 workers 8.20 s → 7.14 s.
+- **Peak memory is still 6.2 GB and is not explained.** `archive list`, which
+  touches only the 0.67 MB member table, already peaks at **3.2 GB**, so the bulk
+  is in the container's mapping and file layer rather than in the codec or the
+  decode. That is open work, not a solved claim.
 
 Worth stating for what it is worth: **ChessBase publishes no speed claim for
 unarchiving `.cbv`.** Its only published figure is a *space* claim — "about 30 %
