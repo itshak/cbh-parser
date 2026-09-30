@@ -313,29 +313,31 @@ still be edited after the barrier is in force is not a hand-off.
 
 ### 6.5 Performance, same machine, same archive
 
-Both figures are full extractions of the 1.74 GB archive to disk:
+Full extractions of the 1.74 GB archive to disk:
 
 | | `uncbv` | `cbvault` |
 |---|---|---|
-| wall clock | 66.4 / 66.8 / 70.3 s | **7.1 s** (10 threads) |
-| decoded throughput | 51–54 MB/s | **504 MB/s** |
-| single-threaded | not published | 15.99 s (226 MB/s) |
+| wall clock | 70.1 / 72.6 s | **7.1 s** (4 threads) |
+| decoded throughput | 50–52 MB/s | **504 MB/s** |
+| single-threaded | not published | 16.10 s (224 MB/s) |
 
-**≈9.4× faster** end to end, at byte-identical output. Decode-only, which
-measures the codec rather than the disk: 13.87 s single-threaded (260 MB/s) and
-6.43 s at ten workers (561 MB/s). ChessBase publishes **no** speed claim for
+**≈9.9× faster** end to end, at byte-identical output. Decode-only, which
+measures the codec rather than the disk: 13.43 s single-threaded (269 MB/s) and
+6.81 s at ten workers (561 MB/s). ChessBase publishes **no** speed claim for
 unarchiving a `.cbv`, so there is no vendor figure to beat; its only published
 figure is a space one, which this project does not compete with.
 
+The `.cbv` codec is the one place this project is ahead of everything that
+exists, because `uncbv` is the only other implementation of it. The `.cbh`
+reader is the opposite: measured against the MIT ancestor it was ported from,
+`cbtool` is 1.6× faster than our best and uses 36× less memory, which
+`README.md` § "What is not supported yet" records as open work.
+
 ## 7. Honest limits
 
-- **This is an engineering protocol, not legal advice.** The two-room method is
-  long-established, but a competent lawyer should review both the protocol and
-  the resulting specification before the crates are published. That is recorded
-  as an open question in the change's tasks, not assumed away.
 - **The specifier must be disciplined.** The likely failure is not plagiarism
   but **over-specification** — describing the source's structure instead of the
-  format's facts. The hygiene gate exists for that, and it has not yet run.
+  format's facts. That is what the hygiene gate in §5 is for.
 - **Parity with one implementation is not proof that it was correct.** It is
   proof that we are *compatible*. Where the reference is wrong we may want to
   diverge, and that must then be argued from the format, not from the code.

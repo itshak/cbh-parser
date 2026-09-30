@@ -49,14 +49,26 @@ jobs:
           #
           # `publish = false` members (cbvault-fixtures) are excluded: they are
           # never shipped and cargo would refuse them anyway.
+          #
+          # The `as $p` binding is load-bearing and was a real bug. Written as
+          # `map("\(.name)|\(.deps | ...)")`, the `\(.deps | sort | join(","))`
+          # interpolation evaluates its expression against **the array itself**
+          # rather than against the element, so `sort` is applied to a stream of
+          # objects and jq fails with "cannot be sorted, as it is not an array".
+          # Binding the element first and interpolating `$p.deps` is
+          # unambiguous. It only showed up when the script was actually run
+          # against real `cargo metadata` output, which is the only way a shell
+          # expression gets tested at all.
           meta=$(cargo metadata --no-deps --format-version 1)
           edges=$(printf '%s' "$meta" | jq -r '
-            [ .packages[] | select(.publish != [])
+            [ .packages[]
+              | select(.publish != [])
               | { name: .name,
                   deps: [ .dependencies[]
                           | select(.path != null and (.kind == null))
                           | .name ] } ]
-            | map("\(.name)|\(.deps | sort | join(","))") | .[]')
+            | map(. as $p | "\($p.name)|\($p.deps | sort | join(","))")
+            | .[]')
           if [ -z "$edges" ]; then
             echo "::error::no publishable crate found in the workspace."
             exit 1

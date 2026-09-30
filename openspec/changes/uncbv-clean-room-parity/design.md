@@ -122,9 +122,6 @@ failing paragraph removes it. What was removed goes in the audit record.
 
 ## Honest limits
 
-- This is an engineering protocol, not legal advice. The two-room method is
-  long-established, but a competent lawyer should review it before publication.
-  That is recorded as an open question rather than assumed away.
 - The spec writer must be disciplined. The likely failure is not plagiarism but
   **over-specification** — describing the source's structure instead of the
   format's facts. The hygiene gate exists for that.

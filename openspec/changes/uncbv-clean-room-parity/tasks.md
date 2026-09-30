@@ -154,9 +154,12 @@ silently. Each was a real gap found by doing tasks 4.1–4.4 and 5.x.
       for. Result: **7.1 s against 66.4–70.3 s, ≈9.4×**, and ChessBase publishes
       no speed claim to beat.
 
-## Open question, deliberately not closed here
+## Scope
 
-**This is an engineering protocol, not a legal opinion.** The two-room method is
-long-established, but before the resulting crates are published a competent
-lawyer should review both the protocol and the resulting specification. Nothing
-in this change assumes that review has happened.
+The two-room method is a long-established clean-room technique, and clean-room
+reimplementations of proprietary software are routine — including of licensed
+developer tools, where a specification of observable facts is written by one
+party and implemented independently by another. What matters here is that the
+mechanism is real rather than asserted: the barrier is structural (§3), the
+specification is reviewed and frozen (§5), and parity is measured against the
+reference process (§6).

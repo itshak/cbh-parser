@@ -57,7 +57,7 @@ authoritative list of what is missing.
   Huffman-then-LZ — so extraction yields **3,871 of 3,871 members and 100 % of
   the reference archive's 3.61 GB**, including the 512 MB `.cbh` and the 1.25 GB
   `.cbj`. Listing touches no part of the data pool. Extracting the archive takes
-  **7.1 s on ten threads (504 MB/s decoded), against 66.4–70.3 s for `uncbv`** on
+  **7.1 s on four threads (504 MB/s decoded), against 70.1–72.6 s for `uncbv`** on
   the same machine.
 - **Parity with `uncbv` measured, not asserted.** Every member of every corpus —
   `twic1134.cbv`, the 3,871-member reference archive and the three `.cbz` samples
@@ -125,6 +125,14 @@ authoritative list of what is missing.
 These are real and are not fixed; each is described in `README.md` § "What is not
 supported yet".
 
+- **`.cbh` decoding is slower than the ancestor it was ported from.** Measured on
+  the 11,151,119-record database with both readers replaying the same
+  883,141,297 plies: `cbtool` from `oschess-cb-bridge` (MIT) takes **6.60 s using
+  42 MB**, where `cbvault verify` takes **10.48 s on four threads using
+  1,521 MB**. The ancestor is 1.6× faster than our best and 6.1× faster than us
+  single-threaded, using 36× less memory. The memory cause is identified —
+  `DbFile::read` copies the whole range instead of lending the mapping's slice —
+  and fixing it is an API change, not a tweak.
 - **The 2CBH `.2cbg` move codec is not decoded**, and a specific list of 2CBH
   header fields remains unknown. A 2CBH database yields tags and annotations but
   no `moves2`.

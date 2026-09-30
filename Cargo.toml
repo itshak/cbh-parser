@@ -8,6 +8,12 @@ edition = "2024"
 license = "MIT"
 rust-version = "1.88"
 repository = "https://github.com/itshak/cbvault"
+documentation = "https://docs.rs/cbvault"
+homepage = "https://github.com/itshak/cbvault"
+# crates.io shows the README on the crate page and in search results, and reads
+# `categories` to place the crate. Without them a published crate is a wall of
+# code with no explanation, which is the whole cost of being on the registry.
+readme = "README.md"
 
 [workspace.dependencies]
 gigachess = "0.1.9"

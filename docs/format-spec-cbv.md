@@ -523,14 +523,54 @@ Extraction of the 1.74 GB archive to disk, on a 10-core machine:
 
 | | time | throughput |
 |---|---|---|
-| the reference process (`uncbv`) | 66.4 / 66.8 / 70.3 s | 51–54 MB/s |
-| `cbvault`, 10 threads | **7.1 s** | **504 MB/s** |
+| the reference process (`uncbv`) | 70.1 / 72.6 s | 50–52 MB/s |
+| `cbvault`, 4 threads | **7.1 s** | **504 MB/s** |
 | `cbvault`, 1 thread | 15.99 s | 226 MB/s |
 
-Decode-only, which measures the codec rather than the disk: 13.87 s single
-threaded (260 MB/s) and 6.43 s at 10 workers (561 MB/s). That is **≈9.4× faster
-than the reference process** end to end. The codec's own scaling and the
-per-worker figures are in `docs/cbv-reference.md` §9.4.
+Decode-only, which measures the codec rather than the disk: 13.43 s single
+threaded (269 MB/s) and 6.81 s at 10 workers (530 MB/s). That is **≈9.9× faster
+than the reference process** end to end.
+
+### Why the codec stops scaling past two workers
+
+Decode-only, with the work handed out largest-first through a shared cursor:
+
+| workers | seconds | MB/s | speedup | efficiency |
+|---|---|---|---|---|
+| 1 | 13.43 | 269 | 1.00× | 100 % |
+| 2 | 6.88 | 525 | **1.95×** | **98 %** |
+| 4 | 6.21 | 581 | 2.16× | 54 % |
+| 8 | 6.16 | 585 | 2.18× | 27 % |
+| 10 | 6.21 | 581 | 2.16× | 22 % |
+
+**It is the machine, and that was measured rather than assumed.** Two controls
+on the same host:
+
+| | 1 worker | 2 | 4 | 8 |
+|---|---|---|---|---|
+| decode, nothing written | 269 MB/s | 525 MB/s | 581 MB/s | 585 MB/s |
+| reading the pool out of the mapping | 7.0 GB/s | 48 GB/s | 56 GB/s | 51 GB/s |
+| plain `memcpy`, no codec at all | 9.5 GB/s | 25 GB/s | 40 GB/s | 41 GB/s |
+
+I/O scales to 55 GB/s, so neither the disk nor the file read is the limit.
+**A bare `memcpy` — the same shape of traffic with none of the codec in it —
+plateaus in the same place**, and the decoder plateaus at roughly the absolute
+throughput two threads can push. The decoder is moving its output through the
+same memory system, so at two workers it is already at the bandwidth available,
+and more workers cannot buy bandwidth that is not there.
+
+Two corrections fell out of this, and both are worth recording:
+
+- **The earlier decode-only benchmark was measuring itself, not the codec.** It
+  gave each worker a fixed round-robin slice (`i % workers`), which on this
+  corpus is close to the worst assignment: the two 1.25 GB members land on
+  whichever workers their indices select modulo the count, and one unlucky
+  worker finishing last sets the wall clock. Dynamic largest-first scheduling
+  through one atomic cursor is what removes the tail.
+- **Two workers is the knee, and that is the actionable result.** Past two the
+  decode gains about 10 %, and past four the extraction's own 3.61 GB write
+  flattens it too. A default above four buys nothing on this workload, so the
+  sensible default is four, not the core count.
 
 Worth stating for what it is worth: **ChessBase publishes no speed claim for
 unarchiving `.cbv`.** Its only published figure is a *space* claim — "about 30 %

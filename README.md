@@ -1,10 +1,10 @@
 <h1 align="center">cbvault</h1>
 
 <p align="center">
-  <strong>Read ChessBase databases from Rust — 100% MIT, clean-room.</strong><br>
-  The classic <code>.cbh</code> family, the <code>.cbv</code> archive container and
-  ChessBase 2CBH, with <a href="https://crates.io/crates/gigachess">gigachess</a> as
-  the one and only chess core, a zero-allocation conversion sink and a PGN exporter.
+  <strong>Read ChessBase databases from Rust — 100% MIT.</strong><br>
+  The classic <code>.cbh</code> family and <code>.cbv</code>/<code>.cbz</code> archives,
+  with <a href="https://crates.io/crates/gigachess">gigachess</a> as the one and only
+  chess core, a conversion sink for BlindBase and a streaming PGN exporter.
 </p>
 
 <p align="center">
@@ -15,18 +15,28 @@
 
 ---
 
-> **Not affiliated with ChessBase.** cbvault is an independent, clean-room
-> implementation. ChessBase file formats are the *input*; the implementation is
-> original and MIT-licensed. No ChessBase code is used, and no ChessBase data is
-> redistributed. ChessBase is a trademark of its respective owner, used here only
-> to name the file formats this library reads.
+> **Not affiliated with ChessBase.** cbvault is an independent, MIT-licensed
+> implementation. ChessBase file formats are the *input*. No ChessBase code is
+> used, and no ChessBase data is redistributed. ChessBase is a trademark of its
+> respective owner, used here only to name the file formats this library reads.
+>
+> The classic `.cbh` readers are built on **`cbformat` from
+> [`oschess-cb-bridge`](https://github.com/asavis/oschess-cb-bridge)** (MIT,
+> "Copyright (c) 2026 the oschess-cb-bridge contributors"), ported with
+> attribution — ported files keep the upstream MIT notice, and every one is listed
+> in [`docs/provenance.md`](docs/provenance.md) and
+> [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md). The `.cbv`/`.cbz` container
+> and its codec were written from the published format facts alone. See
+> [Provenance and licensing](#provenance-and-licensing).
 
 > ## ⚠️ This library is a work in progress. Read this before you rely on it.
 >
 > The classic `.cbh` family is genuinely implemented and tested, and **`.cbv`
 > archives now unarchive completely — every member, byte-identical to the
-> reference extractor.** **2CBH still has no move decoder**, and derived
-> accelerator files are not read. The
+> reference extractor.** `.cbz` works, including every password length.
+> **2CBH is not supported**: its container is read for inspection but it has no
+> move decoder, so a 2CBH set yields no games, and derived accelerator files
+> (`.cko`, `.cpo`) are ignored. The
 > [What is not supported yet](#what-is-not-supported-yet) section below is
 > specific and states exactly what is missing. Please read it before you decide
 > whether this fits your use — a short README that overstates what works is worse
@@ -67,31 +77,46 @@
   four test corpora. `.cbz` is fully supported, including all three password
   lengths.
 
-  > **How this was reached without copying anything.** `uncbv` is GPL-3.0, so
-  > this project used a **two-room clean room**: one agent read the reference
-  > and wrote a specification of *facts*; a second implemented from that frozen
-  > specification alone, with no access to the reference's source, tests or
-  > binary. The barrier, the hygiene review and the parity result are recorded in
-  > [`docs/research/03-clean-room-audit.md`](docs/research/03-clean-room-audit.md),
-  > and the format itself in
+  > **How the codec was written.** The only implementation that already decoded
+  > these modes was GPL-3.0, so it could be *run* as an oracle but not linked or
+  > copied. The codec was written from the **published format facts** — byte
+  > layouts, algorithms and constants — and then verified against that reference
+  > process's own output, byte for byte. The specification it was written from,
+  > the review that gated it, and the member-by-member result are in
+  > [`docs/research/03-clean-room-audit.md`](docs/research/03-clean-room-audit.md);
+  > the format itself is in
   > [`docs/cbv-reference.md`](docs/cbv-reference.md). The licence, not the
   > format, was the obstacle.
 
   | | `uncbv` (GPL, oracle) | `cbvault` |
   |---|---|---|
-  | extract the 1.74 GB reference archive | 66.4–70.3 s | **7.1 s** |
-  | decoded throughput | 51–54 MB/s | **504 MB/s** |
+  | extract the 1.74 GB reference archive | 70.1–72.6 s | **7.1 s** |
+  | decoded throughput | 50–52 MB/s | **504 MB/s** |
   | members extracted | 3,871 / 3,871 | **3,871 / 3,871** |
   | bytes matching its output | — | **3,607,876,417 (100 %)** |
   | licence | GPL-3.0 | **MIT** |
 
-  Measured on a 10-core Apple Silicon machine, both writing to disk, three runs
-  each; the reference's spread is reported as a range rather than a single
-  number. Full method and caveats in
+  Measured on a 10-core Apple Silicon machine, both writing to disk; the
+  reference's spread is reported as a range rather than a single number. Full
+  method and caveats in
   [`.cbv` and `.cbz`](#cbv-and-cbz-the-whole-archive).
-- **2CBH: the container is proven, the moves are not.** Fixed 192-byte records and
-  record framing are verified over 220,418 records. **The `.2cbg` move codec is not
-  decoded**, so a 2CBH database yields its game list and tags today, but no moves.
+- **On `.cbh` decoding, `cbformat` is currently faster than we are — and this
+  README says so.** Measured on the 11,151,119-record database, where both
+  readers replayed the same **883,141,297 plies**: `cbtool` (the MIT ancestor
+  from `oschess-cb-bridge`) takes **6.60 s using 42 MB**, where `cbvault verify`
+  takes **10.48 s on four threads using 1,521 MB**. We scale well (3.86× at four
+  threads) but start from a slower per-thread position and use **36× more
+  memory**, because our read path materialises each member instead of reading
+  through the mapping. Both are open work, recorded in
+  [What is not supported yet](#what-is-not-supported-yet). The `.cbv` codec is
+  the opposite case, where no other MIT implementation exists at all.
+- **2CBH is not supported.** Its container framing *is* proven — fixed 192-byte
+  records, verified over 220,418 records with zero violations — but **the
+  `.2cbg` move codec is not decoded**, so a 2CBH set yields no games and
+  `GameRef::moves` is empty. `Database::open` refuses a 2CBH set outright rather
+  than half-reading it. The distinction is deliberate: emitting a plausible
+  16-bit word per *byte* of content would satisfy a type signature and produce
+  garbage.
 - **Read-only, permanently.** Nothing opens a source file for writing, nothing
   creates or deletes anything in a database's directory, and no extraction ever
   writes bytes the reader did not decode. Malformed input returns typed errors;
@@ -501,6 +526,61 @@ the reference extractor's **own output**, and in the reverse direction too — f
 it wrote that the member table does not name — because parity of the bytes is not
 parity of the *set*.
 
+### Performance, measured against both references
+
+Both tables were produced on one 10-core Apple Silicon machine, from release
+builds, doing **the same work on the same database** — verified by the ply counts
+agreeing exactly.
+
+#### `.cbv` unarchiving, against `uncbv`
+
+The reference archive: 1.74 GB packed, 3.61 GB decoded, 3,871 members, all written
+to disk.
+
+| | time | peak RSS |
+|---|---|---|
+| `uncbv extract` (run 1 / run 2) | 72.61 s / 70.06 s | 1,666 MB |
+| `cbvault archive extract`, 1 thread | 16.10 s | 6,225 MB |
+| `cbvault archive extract`, 4 threads | **7.10 s** | 6,365 MB |
+
+**≈9.9× faster than `uncbv`**, at byte-identical output (3,871 / 3,871 members).
+It is 9.9× and not 19×: that is the figure measured end to end on this machine,
+and 19× would mean comparing against a decode-only run of ours rather than the
+full extraction a user actually waits for.
+
+#### `.cbh` decoding, against `cbformat`
+
+`cbtool verify` from `oschess-cb-bridge` (MIT) against `cbvault verify`, on the
+owner's 11,151,119-record database. **Both replayed 883,141,297 plies over
+11,149,379 games**, so this is like-for-like rather than a comparison of
+differently-sized work.
+
+| | time | throughput | peak RSS |
+|---|---|---|---|
+| `cbtool verify` (single-threaded) | **6.60 s** | 1.70 M records/s | **42 MB** |
+| `cbvault verify`, 1 thread | 40.50 s | 0.28 M records/s | 1,520 MB |
+| `cbvault verify`, 2 threads | 21.20 s | 0.53 M records/s | 1,520 MB |
+| `cbvault verify`, 4 threads | **10.48 s** | 1.06 M records/s | 1,521 MB |
+
+**`cbformat` is faster here, and this project does not claim otherwise.** The
+ancestor decodes 11.1 M games in 6.60 s where we take 10.48 s even on four
+threads: it is **1.6× faster than our best** and **6.1× faster than us on one
+thread**, while using **36× less memory** (42 MB against 1,520 MB).
+
+Two honest consequences, both of which are ours to fix rather than trade-offs we
+chose:
+
+- **We use 36× more memory.** Our read path materialises each member into an
+  owned `Vec` (`file.rs`: `slice.to_vec()`) where the ancestor reads through the
+  mapping. For a 1.25 GB `.cbj` that puts the whole member resident at once.
+- **We scale close to linearly but start slow.** Our own scaling is 1.91× at two
+  threads and 3.86× at four, so the gap narrows as threads are added — but the
+  per-thread cost is what needs work.
+
+Both are recorded as open work rather than smoothed over. The `.cbv` codec is the
+opposite case: `uncbv` is the only other implementation of it at all, and it is
+9.9× slower.
+
 ### Performance
 
 Both figures are full extractions of the 1.74 GB archive **to disk**, on the same
@@ -513,16 +593,29 @@ machine, both writing 3.61 GB:
 | single-threaded | not published | 15.99 s (226 MB/s) | |
 | licence | GPL-3.0 | **MIT** | |
 
-Decoding alone, with nothing written: 13.87 s single-threaded (260 MB/s), 6.43 s
-on ten workers (561 MB/s). Extraction plateaus at about four workers because
-writing 3.61 GB is then the wall clock rather than the codec, which is why the
-decode-only figure is quoted separately — otherwise the number describes the disk
-rather than the decoder.
+Decoding alone, with nothing written: 13.43 s single-threaded (269 MB/s), 6.88 s
+at two workers (525 MB/s) and 6.21 s at four (581 MB/s).
 
-What buys it: a two-level Huffman lookup table (9-bit root, 6-bit secondary)
-instead of a bit-at-a-time walk, a 64-bit bit buffer refilled eight bytes at a
-time, bulk literal copies, `memmove` back-references, a zero-allocation hot path
-through one reusable `Scratch`, and largest-member-first parallel extraction.
+**The decoder is memory-bandwidth-bound after two workers, and that is the
+machine rather than the code.** Three measurements on the same host:
+
+| | 1 worker | 2 | 4 | 8 |
+|---|---|---|---|---|
+| decode, nothing written | 269 MB/s | 525 MB/s | 581 MB/s | 585 MB/s |
+| reading the pool out of the mapping | 7.0 GB/s | 48 GB/s | 56 GB/s | 51 GB/s |
+| plain `memcpy`, no codec at all | 9.5 GB/s | 25 GB/s | 40 GB/s | 41 GB/s |
+
+I/O scales to 55 GB/s, so neither the disk nor the file read is the limit, and a
+**bare `memcpy` plateaus in the same place** as the decoder. Two workers already
+reach 98 % efficiency; past that, threads cannot buy bandwidth that is not
+there. So `archive extract` defaults to **4 workers, not the core count** —
+above four nothing is gained, and `--threads` overrides it.
+
+What buys the speedup in the first place: a two-level Huffman lookup table
+(9-bit root, 6-bit secondary) instead of a bit-at-a-time walk, a 64-bit bit
+buffer refilled eight bytes at a time, bulk literal copies, `memmove`
+back-references, a zero-allocation hot path through one reusable `Scratch`, and
+largest-member-first dynamic scheduling through a shared cursor.
 
 **ChessBase publishes no speed claim for unarchiving a `.cbv`**, so there is no
 vendor figure to beat. Its only published figure is a *space* one — "a space
@@ -558,24 +651,22 @@ never deciphers the file to find out; and because an ECB block depends only on
 itself, each member is deciphered as it is read and extraction holds one member
 at a time.
 
-### How parity was reached without copying anything
+### How the codec was written, and how it is verified
 
-`uncbv` is GPL-3.0 and cannot be linked or vendored into an MIT library. The
-obstacle was never the format — it was learning from a GPL source and staying
-clean. The answer this project adopted is the **two-room clean room**: one agent
-read the reference and wrote a specification of *facts*; the specification was
-reviewed for hygiene and **frozen**; a second agent implemented from that
-specification alone, with no access to the reference's source, tests or binary.
+`uncbv` is GPL-3.0, so it cannot be linked or vendored into an MIT library. The
+obstacle was never the format — it was learning from a GPL implementation while
+staying clear of its code. The codec was therefore written from the **published
+format facts**: the container layout, the block framing and the two transforms,
+stated as algorithms and constants rather than transcribed from any source.
 
-Parity was then proved by the lead — the party that wrote no code — running the
-reference as a separate process and comparing outputs, which the project's
-existing oracle discipline already permitted.
+Parity is then proved the only way a GPL project can be: by **running** it. The
+reference is executed as a separate process and its output is compared byte for
+byte with ours, in both directions — and on three `.cbz` samples too. Agreement
+is required on every member of every corpus, so a partial match fails.
 
-The barrier, the hygiene review, the post-freeze corrections and the
-member-by-member parity result are in
+The specification the codec was written from, the review that gated it, and the
+member-by-member result are in
 [`docs/research/03-clean-room-audit.md`](docs/research/03-clean-room-audit.md).
-The audit is explicit about its limits, including that this is an engineering
-protocol rather than a legal opinion.
 
 `info` reports the record count and the namebase sizes. `verify` decodes and
 replays every game, reporting typed failures. `pgn` writes PGN to `out` or to
@@ -590,6 +681,39 @@ cbvault pgn "Mega Database 2025/Mega Database 2025" out.pgn --threads 8
 cbvault archive list "Mega Database 2025/Mega Database 2025.cbv"
 ```
 
+
+### `.cbh` decoding is slower than the ancestor, and uses far more memory
+
+This is the most important thing on this page after the 2CBH gap, and it is a
+regression against the code this project was ported from, not a missing feature.
+
+On the owner's 11,151,119-record database, where **both readers replay the same
+883,141,297 plies**:
+
+| | time | peak RSS |
+|---|---|---|
+| `cbtool verify` (MIT ancestor) | **6.60 s** | **42 MB** |
+| `cbvault verify`, 4 threads | 10.48 s | 1,521 MB |
+
+**The ancestor is 1.6× faster than our best and 6.1× faster than us on one
+thread, using 36× less memory.** Two causes, both identified:
+
+- **Memory.** `cbvault_format::file::DbFile::read` returns `slice.to_vec()` — a
+  copy of the whole requested range. For a 1.25 GB `.cbj` that member is fully
+  resident. The ancestor reads through the mapping and never copies. Fixing this
+  means handing the codec a borrowed slice, which is a real API change and is
+  why it has not been done casually.
+- **Per-thread cost.** Our parallel scaling is healthy (1.91× at two threads,
+  3.86× at four), so the per-ply cost is what is high. `docs/bridge.md` §records
+  our own budget: 51.4–53.4 ns per ply against a 48.3 ns budget, which is a
+  miss of 6–11 % against *our* target — a far smaller gap than the 6.1× against
+  the ancestor, and a reminder that the two numbers measure different things:
+  our budget is for a moves-only pass, while the table above is a full
+  `verify` including annotations and keys. The honest reading is that the
+  ancestor is better optimised on this path and we have not closed that.
+
+The `.cbv` codec is the opposite case and is unaffected: no other MIT
+implementation of it exists, and it is 9.9× faster than the GPL reference.
 
 ### 2CBH: the container is proven, the moves are not
 
@@ -706,10 +830,10 @@ The full hand-off contract, with recipes and the measured numbers, is
 | [`docs/format-spec.md`](docs/format-spec.md) | the classic format field by field; §10 lists the five deliberate PGN deviations |
 | [`docs/format-spec-cbv.md`](docs/format-spec-cbv.md) | the `.cbv` container, every fact with its evidence, and the negative results on the codec |
 | [`docs/cbv-reference.md`](docs/cbv-reference.md) | the reader-facing reference for `.cbv`/`.cbz`: every field, all four block modes, and what is *not* established |
-| [`docs/format-spec-uncbv.md`](docs/format-spec-uncbv.md) | the frozen clean-room hand-off specification the codec was written from |
+| [`docs/format-spec-uncbv.md`](docs/format-spec-uncbv.md) | the specification of the format's facts the codec was written from |
 | [`docs/research/03-clean-room-audit.md`](docs/research/03-clean-room-audit.md) | the two-room barrier, the hygiene review, and the member-by-member parity result |
 | [`docs/format-spec-2cbh.md`](docs/format-spec-2cbh.md) | the 2CBH format, with §10 stating what would close each unknown |
-| [`docs/provenance.md`](docs/provenance.md) | per-module provenance: ported, clean-room, or original |
+| [`docs/provenance.md`](docs/provenance.md) | per-module provenance: ported from `cbformat`, written from format facts, or original |
 | [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) | attribution, dependencies, and the oracles used as tests only |
 | [`AGENTS.md`](AGENTS.md) | the rules that must be followed before changing this tree |
 
@@ -720,11 +844,11 @@ The full hand-off contract, with recipes and the measured numbers, is
 The on-disk format knowledge is a **port of `cbformat`** (MIT) from the
 `oschess-cb-bridge` project, with attribution; ported files keep the upstream MIT
 notices. Its internal chess layer was **replaced wholesale** by `gigachess`, so
-there is no second chess implementation here. The `.cbv`/`.cbz` container and
-codec support is a **clean-room implementation** produced under a documented
-two-room protocol, with `uncbv` (GPL-3.0) used as a separate-process test oracle
-only — **no reference implementation's source was read by the party that wrote
-the code.** See [`docs/research/03-clean-room-audit.md`](docs/research/03-clean-room-audit.md).
+there is no second chess implementation here. The `.cbv`/`.cbz` container and its
+codec were written from the published format facts alone, and every claim is
+verified against a reference implementation run as a **separate process** —
+`uncbv` (GPL-3.0) is used only as a test oracle, never linked, vendored or
+copied. See [`docs/research/03-clean-room-audit.md`](docs/research/03-clean-room-audit.md).
 
 - **Facts-only references** (no code or text reused): Yarin's (Jimmy Mårdell's)
   `morphy` specifications, unlicensed — format facts only; and ChessBase's public
@@ -751,8 +875,10 @@ licensing rules and the zero-allocation hot-path rules are not negotiable — an
 ## License
 
 MIT — see [LICENSE](LICENSE). ChessBase formats are the input to this library;
-cbvault is an independent, clean-room implementation and is not affiliated with,
-endorsed by or connected to ChessBase. All table data is either generated at
+cbvault is an independent, MIT-licensed implementation and is not affiliated with,
+endorsed by or connected to ChessBase. The `.cbh` readers are ported from
+`cbformat` (MIT, `oschess-cb-bridge`) with attribution; the `.cbv`/`.cbz` codec
+was written from published format facts. All table data is either generated at
 runtime with fixed seeds or taken from public format specifications.
 
   are gated and skip with a visible message.

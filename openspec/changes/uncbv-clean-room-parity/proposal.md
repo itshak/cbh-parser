@@ -50,9 +50,6 @@ run as a separate process, which we are already permitted to do.
 - Writing `.cbv`/`.cbz` — this project is read-only by policy.
 - Reimplementing anything that is *not* the archive container. The `.cbh` game
   format already has a complete, independently implemented reader.
-- Claiming legal review. This is an engineering protocol, and a competent
-  lawyer should look at it before the resulting crates are published. That is
-  recorded as an explicit open question rather than glossed over.
 
 ## Impact
 

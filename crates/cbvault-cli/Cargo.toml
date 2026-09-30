@@ -1,11 +1,19 @@
 [package]
 name = "cbvault-cli"
-description = "The `cbh` command line: info, verify, pgn, games and archive"
+description = "The cbvault command line: info, verify, pgn, and .cbv/.cbz archive list and extract"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
+# On the registry a crate with no keywords and no categories is unsearchable and
+# unplaced, so both are stated per crate rather than inherited: crates.io
+# validates categories against each crate's own targets.
+keywords = ["chess", "chessbase", "pgn", "cbv", "cli"]
+# crates.io validates `categories` per crate, and it rejects
+# `command-line-utilities` on a crate with no binary target, so it is
+# on `cbvault-cli` alone rather than inherited by the libraries.
+categories = ["games", "command-line-utilities"]
 
 [[bin]]
 name = "cbvault"
