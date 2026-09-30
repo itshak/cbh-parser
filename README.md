@@ -57,12 +57,19 @@
   stays standard. Against a 419,385-game ChessBase export, **407,350 games (97.1 %)
   match byte for byte**; the remaining differences are five deliberate,
   documented deviations plus a small residue.
-- **`.cbv` archives: the container is complete, the codec is 59 %.** The member
-  table is parsed and self-validated for every member. Stored (mode `0x00`) and
-  **Huffman (mode `0x02`)** members extract and are verified byte-exact; modes
-  `0x01` and `0x03` report a typed error and are never written to disk. The
-  missing mode is not a long tail: **mode `0x03` holds all four database files**,
-  2.3 GB of the archive's 3.3 GB. See
+- **`.cbv` archives: the container is complete; it does NOT yet unarchive into a
+  database.** This is the important caveat in this README, so it is stated
+  plainly rather than buried in a percentage:
+
+  > **You cannot get the `.cbh` (or `.cbg`, `.cbj`, `.cba`) out of a `.cbv` yet.**
+  > All twelve of the reference archive's database files are in mode `0x03`,
+  > which is not decoded. Extract one and you get zero bytes and a typed error.
+  > What *does* extract is the archive's images — 2,286 of 3,871 members, but
+  > only **3.6 % of its bytes**, and 2,205 of those members are `.jpg`.
+
+  The member *count* (59 %) is a misleading metric and the byte count (3.6 %)
+  is the honest one. The container itself is solid: the member table is parsed
+  and self-validated for all 3,871 members, and `.cbz` works fully. See
   [Not supported yet](#what-is-not-supported-yet).
 - **2CBH: the container is proven, the moves are not.** Fixed 192-byte records and
   record framing are verified over 220,418 records. **The `.2cbg` move codec is not
@@ -436,15 +443,31 @@ archive:
 | `0x02` | 58 | **decoded and verified** — Huffman; 38 of the 58 byte-exact, 20 stop on an unidentified trailing block |
 | `0x03` | 1,517 | **not decoded** — the same table over *tokens*; holds every database file |
 
-So **59.0 % of the reference archive extracts exactly today** (2,286 of 3,871),
-and the rest reports a typed error and is never written to disk. That error is
-typed and names the member, so no extraction can quietly produce wrong bytes.
+So 2,286 of 3,871 members extract — and that is **3.6 % of the archive's bytes**,
+1.8 % of its real content. The rest reports a typed error and is never written to
+disk, so no extraction can quietly produce wrong bytes.
 
-Worth being blunt about where the remaining 1,585 members sit: the 2,228 stored
-members are overwhelmingly **images** (2,205 `.jpg`), and mode `0x03` holds
-**`.cbj` (1.34 GB), `.cbg` (1.25 GB), `.cbh` (513 MB) and `.cba` (210 MB)** —
-the chess data itself. Reading a database out of an archive is therefore still
-blocked on mode `0x03`, even though most of the archive's *bytes* are readable.
+### The metric that matters, and why the other one misleads
+
+| | members | bytes packed |
+|---|---|---|
+| extractable today | 2,286 of 3,871 (**59 %**) | 63,374,719 of 1,739,254,607 (**3.6 %**) |
+| the twelve database files | **0 of 12** | 1,601,662,129 of 1,739,254,607 (**92.1 %**) |
+
+The 2,228 stored members are overwhelmingly **images** (2,205 `.jpg`), which is
+why the member count looks healthy. Every database file is in mode `0x03`:
+
+| file | packed | size | extractable |
+|---|---|---|---|
+| `Mega Database 2025.cbj` | 235,024,425 | 1,338,134,312 | **no** |
+| `Mega Database 2025.cbg` | 1,004,889,211 | 1,253,435,766 | **no** |
+| `Mega Database 2025.cbh` | 221,529,302 | 512,951,520 | **no** |
+| `Mega Database 2025.cba` | 92,025,702 | 209,593,761 | **no** |
+| `… .cko .cpo .cbe .cbtt .cbs .cbc .cbl .cbm` | 148,194,841 | 62,693,255 | **no** |
+
+**An archive does not yet unarchive into a usable database.** Mode `0x03` uses
+the same Huffman table as mode `0x02` but over *tokens* — literals and
+back-references sharing one alphabet — and that grammar is the open problem.
 
 What was ruled out, so that nobody repeats it: every stream was offered to zlib
 (wrapped and raw), gzip, bzip2, lzma, xz, lzma-alone, zstd and lz4 at every

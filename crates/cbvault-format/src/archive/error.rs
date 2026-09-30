@@ -84,7 +84,7 @@ impl fmt::Display for Error {
         match self {
             Error::Format(e) => write!(f, "{e}"),
             Error::CodecUnavailable { member, mode, codec } => {
-                write!(f, "{member}: mode {mode:#04x} cannot be decoded: the {codec} codec does not handle it")
+                write!(f, "{member}: mode {mode:#04x} cannot be decoded: {codec}")
             }
             Error::Truncated { member, at, needed, have } => {
                 let who = if member.is_empty() { "the stream".to_string() } else { member.clone() };
@@ -123,10 +123,7 @@ mod tests {
     #[test]
     fn a_codec_error_names_the_member_and_its_mode() {
         let e = Error::CodecUnavailable { member: "db.cbh".into(), mode: 3, codec: "no registered codec" };
-        assert_eq!(
-            e.to_string(),
-            "db.cbh: mode 0x03 cannot be decoded: the no registered codec codec does not handle it"
-        );
+        assert_eq!(e.to_string(), "db.cbh: mode 0x03 cannot be decoded: no registered codec");
         assert_eq!(e.path(), None);
         assert!(std::error::Error::source(&e).is_none());
     }

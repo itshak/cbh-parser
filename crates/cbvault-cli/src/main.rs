@@ -358,7 +358,11 @@ fn run_archive_extract(mut args: impl Iterator<Item = String>) -> Result<bool, B
             for s in &skipped {
                 println!("  {s}");
             }
-            println!("see docs/format-spec-cbv.md — modes 1, 2 and 3 are not yet identified");
+            println!(
+                "mode 0x01 and mode 0x03 are not yet identified. Note that mode 0x03 is where this archive keeps \
+                 its database files, so an archive does not yet unarchive into a usable database. \
+                 See docs/format-spec-cbv.md."
+            );
         }
     }
     Ok(skipped.is_empty())
