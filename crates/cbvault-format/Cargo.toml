@@ -9,7 +9,11 @@ rust-version.workspace = true
 # On the registry a crate with no keywords and no categories is unsearchable and
 # unplaced, so both are stated per crate rather than inherited: crates.io
 # validates categories against each crate's own targets.
-keywords = ["chess", "chessbase", "pgn", "cbv", "archive", "parser"]
+# crates.io accepts at most 5 keywords per crate and rejects the upload
+# otherwise, which is a tag-time failure, so this is capped and checked by
+# `cargo test --test registry_metadata`. The dropped "parser" is the least
+# distinctive of the six: it describes half the ecosystem.
+keywords = ["chess", "chessbase", "pgn", "cbv", "archive"]
 # crates.io validates `categories` per crate, and it rejects
 # `command-line-utilities` on a crate with no binary target, so it is
 # on `cbvault-cli` alone rather than inherited by the libraries.
