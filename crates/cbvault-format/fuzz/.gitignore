@@ -1,0 +1,4 @@
+target
+artifacts
+coverage
+# corpus/ seeds are committed; fuzzer-grown files land beside them.

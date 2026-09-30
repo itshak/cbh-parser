@@ -1,0 +1,30 @@
+[package]
+name = "cbvault-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[workspace]
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.cbvault-format]
+path = ".."
+
+[[bin]]
+name = "cbh_record"
+path = "fuzz_targets/cbh_record.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "cbg_framing"
+path = "fuzz_targets/cbg_framing.rs"
+test = false
+doc = false
+bench = false

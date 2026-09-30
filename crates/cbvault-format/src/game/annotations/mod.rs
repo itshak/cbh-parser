@@ -5,7 +5,7 @@
 //! annotation, and text bytes are decoded ([`decode`]) only at the output
 //! boundary. Which types a record holds, and every record's framing, are
 //! [`crate::cbh::annotations`]; quotations and evaluations keep their own
-//! layouts in [`quote`] and [`timing`].
+//! layouts in the private `quote` module and [`timing`].
 //!
 //! Ported from `cbformat`'s `game/annotations/mod.rs` (MIT,
 //! `oschess-cb-bridge` @ `ca9e8f8e`), re-based on borrowed record bytes
@@ -51,7 +51,7 @@ pub enum Annotation<'a> {
     /// was read. See [`squares`].
     Squares(&'a [u8]),
     /// Coloured arrows as (colour, from, to) triples, the squares numbered as
-    /// in [`Squares`]; validated when the record was read. See [`arrows`].
+    /// in [`Annotation::Squares`]; validated when the record was read. See [`arrows`].
     Arrows(&'a [u8]),
     /// A type that carries its own size: its code and its data, the bytes
     /// after the type as stored. [`Kind`] names the codes with a known

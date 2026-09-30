@@ -36,9 +36,30 @@ pub struct DbFile {
     mmap: Option<memmap2::Mmap>,
 }
 
+/// Whether memory mapping is disabled at runtime for testing.
+///
+/// Checked on every [`DbFile::open`]: `CBVAULT_NO_MMAP=1` (or `CBVAULT_MMAP=off`)
+/// makes `open` behave like [`DbFile::open_unmapped`] (plain `pread`, no `mmap`).
+/// Unset (or any other value) keeps the default mapped path. This is a test
+/// switch, not configuration: it exists so the mmap-vs-pread trade-off can be
+/// measured (`scripts/mem_modes.sh`) without rebuilding with `--no-default-features`.
+pub fn mmap_disabled() -> bool {
+    match std::env::var("CBVAULT_NO_MMAP").as_deref() {
+        Ok("1") | Ok("true") | Ok("yes") | Ok("on") => true,
+        _ => matches!(std::env::var("CBVAULT_MMAP").as_deref(), Ok("off") | Ok("0")),
+    }
+}
+
 impl DbFile {
     /// Opens `path` for reading.
+    ///
+    /// Honors [`mmap_disabled`]: with `CBVAULT_NO_MMAP=1` (or `CBVAULT_MMAP=off`)
+    /// no mapping is created and reads go through `pread`, so resident memory
+    /// stays at buffer size instead of growing with the files touched.
     pub fn open(path: PathBuf) -> Result<DbFile> {
+        if mmap_disabled() {
+            return Self::open_unmapped(path);
+        }
         let file = File::open(&path).map_err(|source| Error::Io { path: path.clone(), source })?;
         #[cfg(feature = "mmap")]
         // SAFETY: the file is opened read-only and the mapping is read-only;

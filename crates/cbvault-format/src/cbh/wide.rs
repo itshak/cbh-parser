@@ -28,7 +28,51 @@ pub struct Wide {
     count: u32,
 }
 
+/// Whether the `.cbj` wide index is force-disabled at runtime for testing.
+///
+/// `CBVAULT_NO_WIDE=1` (or `CBVAULT_WIDE=off`) makes [`Wide::open_auto`] skip
+/// the file without opening it. `CBVAULT_WIDE=on` forces the old behaviour
+/// (open whenever present). Unset means automatic: skip when neither `.cbg`
+/// nor `.cba` reaches 4 GiB, where the 64-bit offsets cannot add information.
+pub fn wide_disabled() -> bool {
+    match std::env::var("CBVAULT_NO_WIDE").as_deref() {
+        Ok("1") | Ok("true") | Ok("yes") | Ok("on") => true,
+        _ => matches!(std::env::var("CBVAULT_WIDE").as_deref(), Ok("off") | Ok("0")),
+    }
+}
+
+/// Whether the `.cbj` wide index is force-enabled, overriding the automatic skip.
+fn wide_forced() -> bool {
+    matches!(std::env::var("CBVAULT_WIDE").as_deref(), Ok("on") | Ok("1") | Ok("force"))
+}
+
+/// The size of `path` without opening it for reading, or `None` when unknown.
+fn file_size(path: &Path) -> Option<u64> {
+    std::fs::metadata(path).ok().map(|m| m.len())
+}
+
 impl Wide {
+    /// Opens the `.cbj` beside `stem` when it can add information, else `None`.
+    ///
+    /// This is the call conversion paths should use instead of
+    /// `Wide::open(stem).ok()`: a `.cbg`/`.cba` pair below 4 GiB keeps its full
+    /// offsets in 32 bits, so mapping the 1.3 GB `.cbj` of the reference
+    /// database only re-validates what `.cbh` already says, 11 million times.
+    /// The check costs two `stat`s, no mapping and no reads.
+    pub fn open_auto(stem: &Path) -> Option<Self> {
+        if wide_disabled() {
+            return None;
+        }
+        if !wide_forced() {
+            let cbg = file_size(&super::sibling(stem, ".cbg")).unwrap_or(u64::MAX);
+            let cba = file_size(&super::sibling(stem, ".cba")).unwrap_or(u64::MAX);
+            if cbg < (1u64 << 32) && cba < (1u64 << 32) {
+                return None;
+            }
+        }
+        Wide::open(stem).ok()
+    }
+
     /// Opens the `.cbj` beside `stem` (resolved case-insensitively).
     pub fn open(stem: &Path) -> Result<Self> {
         let path = super::sibling(stem, ".cbj");

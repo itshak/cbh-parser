@@ -12,10 +12,25 @@ use cbvault::replay::verify_parallel;
 use cbvault_format::archive::{Archive, Member};
 use cbvault_format::cbh::{Entities, Headers};
 
+/// Applies the `--no-mmap` / `--no-wide` test switches by setting the env vars
+/// the library checks (`CBVAULT_NO_MMAP`, `CBVAULT_NO_WIDE`). Env wins when both
+/// are set: a flag can only disable more, never re-enable.
+#[allow(unsafe_code)] // `set_var` is the only way to forward CLI flags to the library's env switches.
+fn apply_mem_flags(no_mmap: bool, no_wide: bool) {
+    // SAFETY: called before any database file is opened, on the single main
+    // thread; no other thread reads these vars yet.
+    if no_mmap {
+        unsafe { std::env::set_var("CBVAULT_NO_MMAP", "1") };
+    }
+    if no_wide {
+        unsafe { std::env::set_var("CBVAULT_NO_WIDE", "1") };
+    }
+}
+
 const USAGE: &str = "usage:
   cbvault info   <db> [--games N] [--json]
-  cbvault verify <db> [--threads N] [--batch-size N] [--limit-failures N] [--json]
-  cbvault pgn    <db> [out] [--from ID] [--to ID] [--threads N] [--batch-size N] [--json]
+  cbvault verify <db> [--threads N] [--batch-size N] [--limit-failures N] [--json] [--no-mmap] [--no-wide]
+  cbvault pgn    <db> [out] [--from ID] [--to ID] [--threads N] [--batch-size N] [--json] [--no-mmap] [--no-wide]
   cbvault archive list <archive> [--json] [--password P]
   cbvault archive extract <archive> <dir> [--only NAME] [--threads N] [--json] [--password P]
 
@@ -101,6 +116,8 @@ fn run_verify(mut args: impl Iterator<Item = String>) -> Result<bool, Box<dyn st
     let mut batch_size = 8192;
     let mut failure_limit = 50;
     let mut json = false;
+    let mut no_mmap = false;
+    let mut no_wide = false;
 
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -117,11 +134,14 @@ fn run_verify(mut args: impl Iterator<Item = String>) -> Result<bool, Box<dyn st
                 failure_limit = v.parse()?;
             }
             "--json" => json = true,
+            "--no-mmap" => no_mmap = true,
+            "--no-wide" => no_wide = true,
             other if !other.starts_with('-') && db_path.is_none() => db_path = Some(other.to_string()),
             _ => return Err(USAGE.into()),
         }
     }
 
+    apply_mem_flags(no_mmap, no_wide);
     let db_path = db_path.ok_or(USAGE)?;
     let base = PathBuf::from(&db_path);
 
@@ -192,7 +212,7 @@ fn run_verify(mut args: impl Iterator<Item = String>) -> Result<bool, Box<dyn st
 
 /// `cbvault pgn <db> [out]` — the database's PGN, in record order.
 ///
-/// A thin wrapper over [`export_range`]: it holds no logic of its own, so the CLI
+/// A thin wrapper over [`cbvault::pgn::parallel::export_range`]: it holds no logic of its own, so the CLI
 /// and the library cannot disagree about what the export produces. Writing to a
 /// path streams straight to the file; with no path (or `-`) the PGN goes to
 /// stdout, which is what piping into another tool wants.
@@ -434,6 +454,8 @@ fn run_pgn(mut args: impl Iterator<Item = String>) -> Result<bool, Box<dyn std::
     let mut first: u32 = 1;
     let mut last: u32 = 0; // 0 means the whole database
     let mut json = false;
+    let mut no_mmap = false;
+    let mut no_wide = false;
 
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -458,6 +480,8 @@ fn run_pgn(mut args: impl Iterator<Item = String>) -> Result<bool, Box<dyn std::
                 last = v.parse()?;
             }
             "--json" => json = true,
+            "--no-mmap" => no_mmap = true,
+            "--no-wide" => no_wide = true,
             "-" => out_path = None,
             other if other.starts_with('-') => return Err(USAGE.into()),
             other => {
@@ -472,6 +496,7 @@ fn run_pgn(mut args: impl Iterator<Item = String>) -> Result<bool, Box<dyn std::
         }
     }
 
+    apply_mem_flags(no_mmap, no_wide);
     let db_path = db_path.ok_or(USAGE)?;
     let base = PathBuf::from(&db_path);
     if last != 0 && last < first {
@@ -479,20 +504,34 @@ fn run_pgn(mut args: impl Iterator<Item = String>) -> Result<bool, Box<dyn std::
     }
 
     let t0 = Instant::now();
-    let stats = match &out_path {
+    let (stats, failures) = match &out_path {
         Some(path) => {
             let file = std::fs::File::create(path)?;
             let mut w = std::io::BufWriter::with_capacity(1 << 20, file);
-            let s =
-                cbvault::pgn::parallel::export_span(&base, &mut w, threads, batch_size, failure_limit, first, last)?;
+            let s = cbvault::pgn::parallel::export_span_report(
+                &base,
+                &mut w,
+                threads,
+                batch_size,
+                failure_limit,
+                first,
+                last,
+            )?;
             w.flush()?;
             s
         }
         None => {
             let stdout = std::io::stdout();
             let mut w = std::io::BufWriter::with_capacity(1 << 20, stdout.lock());
-            let s =
-                cbvault::pgn::parallel::export_span(&base, &mut w, threads, batch_size, failure_limit, first, last)?;
+            let s = cbvault::pgn::parallel::export_span_report(
+                &base,
+                &mut w,
+                threads,
+                batch_size,
+                failure_limit,
+                first,
+                last,
+            )?;
             w.flush()?;
             s
         }
@@ -509,9 +548,10 @@ fn run_pgn(mut args: impl Iterator<Item = String>) -> Result<bool, Box<dyn std::
     // because the spec budgets it, and a budget nobody can see is a budget
     // nobody can check.
     if json {
+        let items = failures.iter().map(|s| json_str(s)).collect::<Vec<_>>().join(",");
         eprintln!(
             "{{\"records\":{},\"games\":{},\"guiding_texts\":{},\"bytes\":{},\"seconds\":{secs:.2},\
-             \"failures\":{},\"peak_writer_bytes\":{},\"threads\":{threads}}}",
+             \"failures\":{},\"peak_writer_bytes\":{},\"threads\":{threads},\"failure_items\":[{items}]}}",
             stats.records, stats.games, stats.texts, stats.bytes, stats.failures, stats.peak_writer
         );
     } else {
@@ -524,6 +564,9 @@ fn run_pgn(mut args: impl Iterator<Item = String>) -> Result<bool, Box<dyn std::
             stats.failures,
             stats.peak_writer / (1 << 20)
         );
+        for f in &failures {
+            eprintln!("  {f}");
+        }
     }
 
     Ok(stats.failures == 0)

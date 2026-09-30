@@ -162,6 +162,7 @@ State: `planned` until the porting task lands; then `ported`/`ported (chess swap
 | `cbvault-cli` — `info`, `verify`, `pgn`, `games`, `archive` | Task 5.3, 6.4 |
 | `cbvault-chess` — gigachess bridge helpers (start boards, key alignment) | Task 3.3 |
 | `scripts/oracles/**`, `scripts/fetch-ancestor.sh`, benchmark harness | Tasks 0.4, 0.7, 6.2 |
+| `crates/cbvault-format/fuzz/` (`cbh_record`, `cbg_framing` targets + seed corpus) | Original (`low-memory-footprint` tasks 3.1–3.2): harness calls only the public `GameHeader`/`GameMoves` readers over fuzzer bytes; seeds are zeros, ones and a minimal record head, no database bytes |
 | CI workflow, including the one-chess-core guard | Task 1.3 |
 | `docs/**`, `SPEC.md`, fixtures builder glue | Tasks 0.5, 0.6 |
 

@@ -5,7 +5,7 @@
 //! id is a record's 0-based position. The records also form a sorted tree,
 //! which a reader addressing entities by id does not need. Text is a
 //! single-byte code page, read as UTF-8 where it is valid UTF-8 (see
-//! [`super::bytes::text`]).
+//! the private `super::bytes::text` helper).
 //!
 //! Ported from `cbformat`'s `cbh/entities.rs` (MIT, `oschess-cb-bridge` @
 //! `ca9e8f8e`); modified by cbvault: sibling files are resolved

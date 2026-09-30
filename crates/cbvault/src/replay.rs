@@ -5,7 +5,7 @@ use std::sync::Mutex;
 
 use cbvault_chess::decode::{GameRef, MoveSink, NULL_MOVE, TreeStats, start_as_played, walk_from};
 use cbvault_chess::start::Start;
-use cbvault_format::cbh::{Batch, Headers};
+use cbvault_format::cbh::{Batch, Headers, Wide};
 use cbvault_format::file::DbFile;
 use cbvault_format::game::RecordKind;
 use gigachess::{Board, Move};
@@ -118,6 +118,10 @@ pub fn verify_parallel(
     let headers = Headers::open(base)?;
     let cbg_path = base.with_extension("cbg");
     let cbg = DbFile::open(cbg_path)?;
+    // One `.cbj` rule everywhere: skipped below 2^32 like the export path
+    // (`Wide::open_auto`), enforced above it. `verify` used to ignore `.cbj`
+    // entirely, so a `.cbj`/`.cbh` disagreement passed here and failed there.
+    let wide = Wide::open_auto(base);
     let total = headers.records();
 
     let batch_size = if batch_size == 0 { 8192 } else { batch_size };
@@ -143,7 +147,7 @@ pub fn verify_parallel(
         let mut counting = MoveCounter::default();
         let mut scratch = Vec::new();
 
-        let batch = match Batch::open(&headers, &cbg, None, first, last) {
+        let batch = match Batch::open(&headers, &cbg, wide.as_ref(), first, last) {
             Ok(b) => b,
             Err(e) => {
                 stats.failures += 1;

@@ -90,8 +90,8 @@
 
   | | `uncbv` (GPL, oracle) | `cbvault` |
   |---|---|---|
-  | extract the 1.74 GB reference archive | 70.1–72.6 s | **7.1 s** |
-  | decoded throughput | 50–52 MB/s | **504 MB/s** |
+  | extract the 1.74 GB reference archive | 67.68 s | **7.18 s** |
+  | decoded throughput | 53 MB/s | **502 MB/s** |
   | members extracted | 3,871 / 3,871 | **3,871 / 3,871** |
   | bytes matching its output | — | **3,607,876,417 (100 %)** |
   | licence | GPL-3.0 | **MIT** |
@@ -103,14 +103,13 @@
 - **`.cbh` reading is faster than the MIT ancestor we ported from, on every
   path and every thread count.** Both tools at the same thread count on
   11,151,119 records: **`verify` 39.84 s vs 46.79 s** single-threaded
-  (1.17×), **PGN export 94.43 s vs 142.44 s** single-threaded (**1.51×**) and
-  **11.23 s vs 33.69 s** at ten threads (**3.0×**). The wins are deliberate —
+  (1.17×), **PGN export 79.26 s vs 118.47 s** single-threaded (**1.49×**) and
+  **11.63 s vs 33.43 s** at ten threads (**2.87×**). The wins are deliberate —
   `play_fast` skips incremental Zobrist on the hot path, `Batch` reads move
   records in spans, and Rayon parallelises both. Memory is the one place the
   ancestor leads, and it is mapped pages rather than allocation: `info` costs
-  2 MB, `peak_writer` reports 0 MB after all 11.1 M games, and the 1,255 MB of
-  `.cbg` in the export's peak is the same floor a control program incurs by only
-  reading the file. See
+  2 MB, `peak_writer` reports 0 MB after all 11.1 M games, and `--no-mmap`
+  holds the whole export in 28 MB for identical bytes. See
   [What is not supported yet](#what-is-not-supported-yet).
 - **2CBH is not supported.** Its container framing *is* proven — fixed 192-byte
   records, verified over 220,418 records with zero violations — but **the
@@ -140,7 +139,7 @@
 | Sink-based conversion, ordered parallel | **read** | `for_each_game`, `convert_parallel` |
 | PGN export | **read** | sequential and parallel, byte-identical output |
 | `.cbv` container | **read** | table parsed and validated for every member |
-| `.cbv` extraction, all four modes | **read** | 3,871 / 3,871 members, 100 % of bytes, byte-identical to the reference; 9.9× faster |
+  | `.cbv` extraction, all four modes | **read** | 3,871 / 3,871 members, 100 % of bytes, byte-identical to the reference; 9.4× faster |
 | `.cbz` | **read** | DES-ECB; three key rules (repeat / as-is / fold) verified against the reference's own samples |
 | 2CBH container | **read** | framing proven over 220,418 records |
 | 2CBH `.2cbg` move codec | **not decoded** | yields tags, not `moves2` |
@@ -585,14 +584,18 @@ to disk.
 
 | | time | peak RSS |
 |---|---|---|
-| `uncbv extract` (run 1 / run 2) | 72.61 s / 70.06 s | 1,666 MB |
-| `cbvault archive extract`, 1 thread | 16.10 s | 6,225 MB |
-| `cbvault archive extract`, 4 threads | **7.10 s** | 6,365 MB |
+| `uncbv extract` | 67.68 s | 1,665 MB |
+| `cbvault archive extract`, 1 thread | 16.45 s | 6,225 MB |
+| `cbvault archive extract`, 2 threads | 8.18 s | 5,458 MB |
+| `cbvault archive extract`, 4 threads | **7.18 s** | 6,363 MB |
+| `cbvault archive extract`, 8 threads | 7.41 s | 6,505 MB |
 
-**≈9.9× faster than `uncbv`**, at byte-identical output (3,871 / 3,871 members).
-It is 9.9× and not 19×: that is the figure measured end to end on this machine,
-and 19× would mean comparing against a decode-only run of ours rather than the
-full extraction a user actually waits for.
+**≈9.4× faster than `uncbv`** (67.68 s vs 7.18 s at 4 threads), at byte-identical
+output (3,871 / 3,871 members). Past two threads the extraction is
+memory-bandwidth-bound — four and eight threads tie — which is why the default
+is four, not the core count. The peak RSS is transient decode buffers (a 1.25 GB
+member decodes into a 1.25 GB buffer while its input is still held), not
+retained state; `uncbv` is leaner (one member at a time) and 9× slower.
 
 #### `.cbh` decoding, against `cbformat`
 
@@ -730,21 +733,26 @@ cbvault archive list "Mega Database 2025/Mega Database 2025.cbv"
 
 
 **PGN export on the full database.** Both tools at the same thread count, on
-Mega Database 2025 (11,149,379 games, 883,141,297 plies), output to `/dev/null`,
-idle machine:
+Mega Database 2025 (11,149,371 games, 883,141,297 plies, 9 named failures),
+output to `/dev/null`, idle machine, measured 2026-10-01 back-to-back:
 
 | threads | `cbtool` | `cbvault` | faster | `cbtool` RSS | `cbvault` RSS |
 |---|---|---|---|---|---|
-| 1 | 142.44 s | **94.43 s** | **cbvault 1.51×** | 74 MB | 3,044 MB |
-| 2 | 67.18 s | **40.57 s** | **cbvault 1.66×** | 76 MB | 3,056 MB |
-| 4 | 42.61 s | **21.22 s** | **cbvault 2.01×** | 80 MB | 3,070 MB |
-| 8 | 31.90 s | **13.00 s** | **cbvault 2.45×** | 98 MB | 3,107 MB |
-| 10 | 33.69 s | **11.23 s** | **cbvault 3.00×** | 101 MB | 3,125 MB |
+| 1 | 118.47 s | **79.26 s** | **cbvault 1.49×** | 72 MB | 1,770 MB |
+| 2 | 69.71 s | **40.99 s** | **cbvault 1.70×** | 77 MB | 1,780 MB |
+| 4 | 43.54 s | **21.34 s** | **cbvault 2.04×** | 83 MB | 1,794 MB |
+| 8 | 31.94 s | **11.91 s** | **cbvault 2.68×** | 94 MB | 1,829 MB |
+| 10 | 33.43 s | **11.63 s** | **cbvault 2.87×** | 98 MB | 1,850 MB |
 
-**`cbvault` is faster at every thread count**, from 1.51× single-threaded to 3.0×
-at ten. Both spec budgets are met: the parallel one (**at most 25 s at 8+
-threads, under 8 GiB**) at 13.00 s and 3,107 MB; the single-threaded one (**at
-least 65,000 records/s**, i.e. at most 171.55 s) at 94.43 s, 1.8× inside it.
+**`cbvault` is faster at every thread count**, from 1.49× single-threaded to
+2.87× at ten. Both spec budgets are met: the parallel one (**at most 25 s at 8+
+threads, under 8 GiB**) at 11.91 s and 1,829 MB; the single-threaded one (**at
+least 65,000 records/s**, i.e. at most 171.55 s) at 79.26 s, 2.2× inside it.
+
+The same export with `--no-mmap --no-wide` (plain reads, no `.cbj`) holds
+**28 MB at 1 thread (97.46 s)** and **101 MB at 8 threads (31.07 s)** — at the
+ancestor's own memory level, still 3% faster than it at 8 threads. Output bytes
+are identical in every mode.
 
 This is the archived `pgn-export-sota-performance` work paying off: that change
 recorded **171.9 s** single-threaded for exactly this database before the Rayon
@@ -756,15 +764,19 @@ every ancestor figure must be pinned with `CBTOOL_THREADS` to compare against a
 `--threads` value:
 
 - "the ancestor is 38.11 s, 2.5× faster than us" was a ten-core number against
-  our one-thread run. Pinned, it is **142.44 s** and we are faster.
+  our one-thread run. Pinned, it is **118.47 s** and we are faster.
 - "single-threaded PGN export is the one path where the ancestor leads" is also
-  wrong: **we lead there too, by 1.51×**.
+  wrong: **we lead there too, by 1.49×**.
+
+The export names its 9 failures (2 unreadable records, 7 un-writable games),
+all rejected identically by `cbtool`; a game whose moves will not write is a
+failure, never a counted game.
 
 
 ### Where we still trail the ancestor we ported from
 
 `verify` is faster at 1, 2, 4, 8 and 10 threads (1.15×–1.20×) and PGN export is
-faster at every thread count (1.51×–3.0×), so no path is slower any more. What
+faster at every thread count (1.49×–2.87×), so no path is slower any more. What
 remains is **memory**, and it is a resident-set difference rather than a bug:
 
 `cbvault` maps its database files, so a mapped page that has been read counts
@@ -787,11 +799,19 @@ evictable, shared between processes, and not ours to hold — while the ancestor
 14 MB is genuine, private, resident allocation.
 
 **This is a real trade-off, and it costs us time as well as memory.** Mapping
-should be faster than `pread`, and on this machine it is: 39.5 s against 46.3 s
-single-threaded, a **1.17×** win that holds on a second warm pass. What the
-mapping does not give us is a smaller *resident* footprint, because the kernel
-counts the pages in whichever process touches them. A reader that wants a low RSS
-should `pread` in windows, and this reader does not.
+should be faster than `pread`, and on this machine it is: 79.26 s against 97.46 s
+single-threaded on the full export, a **1.23×** win. What the mapping does not
+give us is a smaller *resident* footprint, because the kernel counts the pages
+in whichever process touches them. A reader that wants a low RSS should `pread`
+in windows — since `low-memory-footprint`, this reader does: `--no-mmap`
+holds 28 MB single-threaded (101 MB at 8 threads) for identical bytes.
+
+The `.cbj` is no longer mapped on bases below 4 GiB at all: its 1.33 GB of
+offsets cannot add information where the 32-bit `.cbh` fields already hold
+every address, so it is skipped (presence still reported) unless
+`CBVAULT_WIDE=on` forces it. That is the whole of the drop from 3,044 MB to
+1,770 MB in the table above; the old behaviour is one env var away for
+measurement.
 
 The one real allocation found on the export path was `Wide::offsets` reading 24
 bytes per record through `DbFile::read`, which allocated a `Vec` — **11 million

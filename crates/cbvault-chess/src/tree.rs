@@ -6,7 +6,7 @@
 //! hands out describe the tree in the stored order of the format (depth first,
 //! the main line first at every position):
 //!
-//! - [`MovesBuf::moves`] is the `moves2` stream ([`NULL_MOVE`] for a null move),
+//! - [`MovesBuf::moves`] is the `moves2` stream ([`crate::decode::NULL_MOVE`] for a null move),
 //! - [`MovesBuf::parents`] names, per move, the move it follows, or [`ROOT`]
 //!   for a move played from the start position,
 //! - [`MovesBuf::is_main`] says, per move, whether it belongs to the game's

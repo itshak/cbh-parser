@@ -77,7 +77,7 @@ impl FromIterator<u32> for IdSet {
 /// Every variant is a comparison of a field the record already holds, so the
 /// scan costs one pass over `.cbh` and nothing else. The constructors take the
 /// *ids* a name resolved to, which is the whole point: [`Filter::player`] is
-/// called once per query with the id [`Entities::find_player`] answered, and
+/// called once per query with the id [`crate::bridge::Entities::find_player`] answered, and
 /// then the scan compares one integer per record instead of resolving four
 /// names per record.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -120,7 +120,7 @@ pub enum Filter {
 
 impl Filter {
     /// Games where the named player is white or black. Resolve the name once
-    /// with [`Entities::find_player`] and build the filter from the id.
+    /// with [`crate::bridge::Entities::find_player`] and build the filter from the id.
     pub fn player(id: u32) -> Filter {
         Filter::Either(id)
     }
@@ -373,8 +373,7 @@ pub struct PositionSearch {
 #[derive(Clone, Copy)]
 pub struct PositionQuery<'p> {
     /// The position to look for, as a Polyglot key. One key is one position;
-    /// run the replay once per key, or test several with
-    /// [`PositionQuery::keys`].
+    /// run the replay once per key, or test several keys with repeated replays.
     pub key: u64,
     /// How often the replay reports progress, in games; 0 for never.
     pub every: u64,

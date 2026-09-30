@@ -74,7 +74,7 @@ impl NameBuf {
     }
 
     /// Decodes `field` — up to its first zero byte, and up to
-    /// [`MAX_NAME_FIELD`] bytes — with the rules of [`text`]: UTF-8 where the
+    /// [`MAX_NAME_FIELD`] bytes — with the rules of the private `text` helper: UTF-8 where the
     /// bytes are valid UTF-8, else Windows-1252. A UTF-8 text cut at the field's
     /// width may end in part of a character, which is dropped, exactly as
     /// `text` does.

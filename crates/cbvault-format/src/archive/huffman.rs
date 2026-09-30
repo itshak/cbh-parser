@@ -116,11 +116,12 @@ impl Entry {
 /// The decode tables for one block.
 ///
 /// A complete code over 256 symbols has at most 255 internal nodes, so
-/// [`Table::SECONDARY`] slots is a hard upper bound and the structure is a
+/// 256 secondary slots is a hard upper bound and the structure is a
 /// constant — no allocation and no `Vec`.
 ///
 /// It is **not** built on the stack. At 34 KB it overflows a thread's stack
-/// inside a nested call, so it lives in the caller's [`Scratch`] and is reused
+/// inside a nested call, so it lives in the caller's
+/// [`crate::archive::codec::Scratch`] and is reused
 /// across every block, member and call: one allocation for the whole archive,
 /// and nothing per block.
 #[derive(Debug)]

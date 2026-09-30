@@ -8,7 +8,10 @@
 //! byte stream is identical to the sequential export's, whatever the thread
 //! count. Only a bounded number of chunks is in flight (one wave per worker
 //! plus one), and the next wave renders while the current one is written, so
-//! peak memory is a few MiB per worker rather than a database's worth of text.
+//! the *buffer* peak is a few MiB per worker rather than a database's worth of
+//! text. The mapped files sit on top: a full-database export faults what it
+//! touches into resident memory (1.9 GB on the reference set, `.cbj` skipped;
+//! ~30–110 MB with `CBVAULT_NO_MMAP=1`, for roughly a quarter more wall time).
 
 use std::io::Write;
 use std::path::Path;
@@ -104,10 +107,26 @@ pub fn export_span(
     first: u32,
     last: u32,
 ) -> Result<ExportStats> {
+    Ok(export_span_report(base, out, threads, batch_size, failure_limit, first, last)?.0)
+}
+
+/// [`export_span`], additionally returning the failure messages (up to
+/// `failure_limit`), in record order — the [`crate::replay::verify_parallel`]
+/// shape, so a caller can name what the stats count.
+pub fn export_span_report(
+    base: &Path,
+    out: &mut impl Write,
+    threads: usize,
+    batch_size: u32,
+    failure_limit: usize,
+    first: u32,
+    last: u32,
+) -> Result<(ExportStats, Vec<String>)> {
     let headers = Headers::open(base)?;
     let entities = Entities::open(base)?;
     let annotations = Annotations::open(base)?;
-    let wide = Wide::open(base).ok();
+    // See `Database::open`: skip the `.cbj` below 4 GiB; `CBVAULT_WIDE=on` forces it.
+    let wide = Wide::open_auto(base);
     let cbg_path = base.with_extension("cbg");
     let cbg = DbFile::open(cbg_path)?;
     let total = headers.records();
@@ -201,7 +220,8 @@ pub fn export_span(
         }
     }
     let _ = out.flush();
-    Ok(stats)
+    let failures = failures.into_inner().unwrap_or_else(|e| e.into_inner());
+    Ok((stats, failures))
 }
 
 /// One chunk: every game of it written through a private writer, its own
@@ -256,17 +276,26 @@ fn render_chunk(
             }
         };
         let anns = match annotations.of_ref(&header, wide, &mut ann_scratch) {
-            Ok(a) => a,
+            Ok(a) => Some(a),
             Err(e) => {
                 record(failures, failure_limit, format!("game {id} annotations: {e}"));
                 stats.failures += 1;
-                let _ = writer.write_game(bytes, &header, entities, &game, None);
-                stats.games += 1;
-                continue;
+                None
             }
         };
-        let _ = writer.write_game(bytes, &header, entities, &game, Some(&anns));
-        stats.games += 1;
+        // A game whose moves will not write is a failure, never an exported
+        // game: counting it would report games whose bytes are not in the
+        // stream (seven such games on the reference set, all also rejected by
+        // the ancestor). An unreadable annotation block alone keeps the game —
+        // the failure above already named it — since the moves are intact.
+        match writer.write_game(bytes, &header, entities, &game, anns.as_ref()) {
+            Ok(()) => stats.games += 1,
+            Err(e) => {
+                record(failures, failure_limit, format!("game {id}: {e}"));
+                stats.failures += 1;
+                continue;
+            }
+        }
         // The writer's high-water mark: the largest game this worker has seen.
         peak = peak.max(writer.capacity());
     }

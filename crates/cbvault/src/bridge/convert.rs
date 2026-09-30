@@ -12,8 +12,16 @@
 //! hash to `(game_id, ply)`; all three want a single ordered write, and a sink
 //! called in completion order would have to sort, which is the work this
 //! avoids. The cost is that at most one wave of chunks is in flight, which is
-//! what keeps peak memory a few MiB per worker instead of a database's worth of
-//! `moves2`.
+//! what keeps the *arena* memory a few MiB per worker instead of a database's
+//! worth of `moves2`.
+//!
+//! Arenas are not the whole footprint: every database file read is
+//! memory-mapped by default, so a full-database pass faults the touched files
+//! into resident memory on top of the arenas (1.9 GB on the reference set
+//! with the `.cbj` skipped, 3.2 GB with it forced). `CBVAULT_NO_MMAP=1`
+//! selects plain reads instead: buffer-sized residency (~30–110 MB) for
+//! roughly a quarter more wall time. See `Wide::open_auto` for the `.cbj`
+//! skip below 2^32.
 //!
 //! Neither path allocates per game. The sequential path reuses one moves
 //! buffer, one key buffer and one set of name buffers
@@ -466,12 +474,14 @@ pub fn convert_parallel(db: &Database, sink: &mut impl GameSink, threads: usize,
         stats: ConvertStats::default(),
     };
 
+    // One pool for the run, installed per wave: building it per wave paid pool
+    // construction ~1,361 times on the reference database for no benefit.
+    let pool_threads = rayon::ThreadPoolBuilder::new()
+        .num_threads(threads)
+        .build()
+        .map_err(|e| Error::corrupt(db.base(), 0, format!("thread pool creation failed: {e}")))?;
     for wave in ranges.chunks(pool.len().max(1)) {
         let jobs: Vec<(&mut Chunk, (u32, u32))> = pool.iter_mut().zip(wave.iter().copied()).collect();
-        let pool_threads = rayon::ThreadPoolBuilder::new()
-            .num_threads(threads)
-            .build()
-            .map_err(|e| Error::corrupt(db.base(), 0, format!("thread pool creation failed: {e}")))?;
         pool_threads.install(|| {
             jobs.into_par_iter().for_each(|(chunk, (first, last))| {
                 chunk.decode(db, first, last, want_annotations);

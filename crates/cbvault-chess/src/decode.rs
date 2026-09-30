@@ -3,7 +3,7 @@
 //! Every byte is first translated through the table of the game's encoding
 //! mode, keyed by the number of moves decoded so far. The compact encoder
 //! then names a move by piece and movement: "the second rook, three squares
-//! up", so the walk keeps the piece lists ([`Pieces`]) next to the board, and
+//! up", so the walk keeps the piece lists (the private `pieces::Pieces`) next to the board, and
 //! saves both at a branch. Every move is played and checked on a `gigachess`
 //! board and reported to a [`MoveSink`] as 16-bit `moves2`; castling is the
 //! king's move onto its own rook, which `gigachess` reads as castling

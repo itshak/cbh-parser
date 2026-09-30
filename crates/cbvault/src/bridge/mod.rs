@@ -29,14 +29,14 @@
 //!   [`convert_parallel`] hand over all of them, sequentially or across
 //!   threads, in the same order either way.
 //! - [`Entities`] answers name to id for a tag search, and the scan in
-//!   [`Database::scan`] pushes a resolved id down to a per-record comparison.
+//!   [`scan`] pushes a resolved id down to a per-record comparison.
 //!
 //! # Provenance
 //!
 //! Original to cbvault (the `blindbase-bridge` change). It consumes
 //! `cbvault-format` for bytes and `cbvault-chess` for chess, and re-reads the
 //! namebase tree itself because the format crate's reader addresses entities by
-//! id only — see [`namebase`].
+//! id only — see the private `namebase` module.
 
 mod convert;
 mod namebase;
@@ -316,7 +316,10 @@ impl Database {
 
         let headers = CbhHeaders::open(&stem)?;
         let entities = Entities::open(&stem)?;
-        let wide = Wide::open(&stem).ok();
+        // `open_auto` skips the 1.3 GB `.cbj` when `.cbg`/`.cba` are below 4 GiB
+        // (its offsets cannot add information there); `CBVAULT_WIDE=on` forces
+        // the old always-open behaviour for measurement.
+        let wide = Wide::open_auto(&stem);
         // `.flags` is optional, and the flags reader reports an absent file as
         // a plain I/O error rather than a `MissingFile`; either way an absent
         // file is not an error here.
@@ -326,6 +329,9 @@ impl Database {
             Err(Error::Io { source, .. }) if source.kind() == std::io::ErrorKind::NotFound => None,
             Err(e) => return Err(e),
         };
+        // `Members.wide` reports presence on disk (what `info` shows), while
+        // `Database.wide` is the opened index (skipped below 4 GiB by
+        // `open_auto`). A present-but-skipped `.cbj` is still listed.
         let members = Members {
             headers: sibling(&stem, ".cbh"),
             moves: sibling(&stem, ".cbg"),
@@ -334,7 +340,7 @@ impl Database {
             tournaments: sibling(&stem, ".cbt"),
             annotators: sibling(&stem, ".cbc"),
             sources: sibling(&stem, ".cbs"),
-            wide: wide.as_ref().map(|_| sibling(&stem, ".cbj")),
+            wide: present(&stem, ".cbj"),
             teams: entities.team_count().gt(&0).then(|| sibling(&stem, ".cbe")),
             flags: flags.as_ref().map(|_| sibling(&stem, ".flags")),
             tournament_tree: present(&stem, ".cbtt"),
@@ -389,7 +395,9 @@ impl Database {
     }
 
     /// The 64-bit offsets of a set whose moves or annotations pass 4 GiB, when
-    /// it has a `.cbj`.
+    /// it has a `.cbj` and the index was opened. `None` means absent *or*
+    /// skipped below 4 GiB (`Wide::open_auto`); either way the 32-bit `.cbh`
+    /// offsets are complete. `members().wide` still reports presence on disk.
     pub fn wide(&self) -> Option<&Wide> {
         self.wide.as_ref()
     }

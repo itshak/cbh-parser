@@ -15,10 +15,10 @@
 //!
 //! | mode | the payload after the mode byte is |
 //! |---|---|
-//! | `0x00` | the output, verbatim ([`Mode::Stored`]) |
-//! | `0x01` | an LZ token stream ([`Mode::Lz`]) |
-//! | `0x02` | a Huffman block ([`Mode::Huffman`]) |
-//! | `0x03` | a Huffman block whose output is an LZ token stream ([`Mode::HuffmanLz`]) |
+//! | `0x00` | the output, verbatim (`Mode::Stored`) |
+//! | `0x01` | an LZ token stream (`Mode::Lz`) |
+//! | `0x02` | a Huffman block (`Mode::Huffman`) |
+//! | `0x03` | a Huffman block whose output is an LZ token stream (`Mode::HuffmanLz`) |
 //!
 //! All four modes are decoded. The rules come from
 //! `docs/format-spec-uncbv.md`, the frozen hand-off artefact of the two-room
