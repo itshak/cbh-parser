@@ -89,6 +89,41 @@ jobs:
       - name: Benchmark compilation check
         run: cargo check --benches --all-features
 
+  fuzz:
+    name: cargo-fuzz (nightly)
+    runs-on: ubuntu-latest
+    # The fuzz targets need nightly (`-Zsanitizer`); stable stays the default
+    # toolchain everywhere else. Ubuntu only: libfuzzer/ASan is fine there and
+    # one platform is enough for a smoke run. 60 s per target matches the
+    # change's acceptance runs (9.4M + 1.1M execs, zero crashes).
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install nightly Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+
+      - name: Cache Cargo Dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates/cbvault-format/fuzz
+
+      - name: Build fuzz targets
+        working-directory: crates/cbvault-format/fuzz
+        run: cargo +nightly fuzz build
+
+      - name: Fuzz cbh_record (60 s)
+        working-directory: crates/cbvault-format/fuzz
+        run: cargo +nightly fuzz run cbh_record -- -max_total_time=60
+
+      - name: Fuzz cbg_framing (60 s)
+        working-directory: crates/cbvault-format/fuzz
+        run: cargo +nightly fuzz run cbg_framing -- -max_total_time=60
+
   one-chess-core:
     name: no chesscore / shakmaty
     runs-on: ubuntu-latest
