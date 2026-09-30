@@ -140,7 +140,7 @@
 | Sink-based conversion, ordered parallel | **read** | `for_each_game`, `convert_parallel` |
 | PGN export | **read** | sequential and parallel, byte-identical output |
 | `.cbv` container | **read** | table parsed and validated for every member |
-| `.cbv` extraction, all four modes | **read** | 3,871 / 3,871 members, 100 % of bytes, byte-identical to the reference; ~9× faster |
+| `.cbv` extraction, all four modes | **read** | 3,871 / 3,871 members, 100 % of bytes, byte-identical to the reference; 9.9× faster |
 | `.cbz` | **read** | DES-ECB; three key rules (repeat / as-is / fold) verified against the reference's own samples |
 | 2CBH container | **read** | framing proven over 220,418 records |
 | 2CBH `.2cbg` move codec | **not decoded** | yields tags, not `moves2` |
