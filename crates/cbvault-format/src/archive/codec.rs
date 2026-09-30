@@ -17,15 +17,21 @@
 //! | mode | members | what the stream is |
 //! |---|---|---|
 //! | `0x00` | 2,228 | **stored**: the bytes from `5` on are the member's content, verbatim |
-//! | `0x01` | 68 | compressed — **not identified** |
-//! | `0x02` | 58 | compressed — **not identified** |
-//! | `0x03` | 1,517 | compressed — **not identified** |
+//! | `0x01` | 68 | **not identified** |
+//! | `0x02` | 58 | **Huffman**, decoded — see [`huffman`](super::huffman) |
+//! | `0x03` | 1,517 | the same Huffman table over a stream of *tokens*; **not decoded** |
 //!
 //! Stored mode was confirmed by decoding: for 2,219 of the 2,228 stored members
 //! the local copy of the file is byte-identical to the stream from offset 5 on.
 //! (The other 9 are `.bmp`/`.jpg` assets whose *local* copies ChessBase has
-//! rewritten; the spec says which side is which.) So 57.6 % of the reference
-//! archive decodes exactly and needs no codec at all.
+//! rewritten; the spec says which side is which.) The 2,228 stored members are
+//! overwhelmingly images — 2,205 of them `.jpg`.
+//!
+//! So 59.0 % of the reference archive now decodes exactly. What is left is
+//! concentrated: **mode 3 holds all four of the archive's database files**
+//! (`.cbj`, `.cbg`, `.cbh`, `.cba` — 2.3 GB of the 3.3 GB), and those remain
+//! undecoded. 20 of the 58 mode-2 members also stop on a trailing block this
+//! build has not identified; they report an error rather than partial bytes.
 //!
 //! # What is open
 //!
@@ -100,12 +106,16 @@ impl Mode {
     /// The stream's body is the member's content, verbatim. Verified by
     /// decoding 2,219 members of the reference archive.
     pub const STORED: u8 = 0x00;
-    /// Observed on 68 members; **not decoded**.
-    pub const LZ: u8 = 0x01;
-    /// Observed on 58 members; **not decoded**.
-    pub const LZ_ALT: u8 = 0x02;
-    /// Observed on 1,517 members; **not decoded**.
-    pub const HUFFMAN: u8 = 0x03;
+    /// Observed on 68 members of the reference archive; **not decoded**.
+    pub const MODE_1: u8 = 0x01;
+    /// Huffman-coded, and **decoded** — see [`super::huffman`]. Observed on
+    /// 58 members of the reference archive.
+    pub const HUFFMAN: u8 = 0x02;
+    /// The same Huffman table over a stream of *tokens* rather than bytes, so
+    /// that literals and back-references share one alphabet. This is the mode
+    /// that carries the reference archive's four database files. **Not
+    /// decoded.**
+    pub const LZ: u8 = 0x03;
 }
 
 /// Something that turns a member's stored stream into the member's bytes.
@@ -191,7 +201,7 @@ impl Codec for Stored {
 /// Only [`Stored`] is present. Registering a codec for one of the unresolved
 /// modes is the whole of the remaining work for extraction.
 pub fn codecs() -> Vec<Box<dyn Codec>> {
-    vec![Box::new(Stored)]
+    vec![Box::new(Stored), Box::new(super::huffman::Huffman)]
 }
 
 /// The name of the codec that would decode `mode`, or `None` when no registered

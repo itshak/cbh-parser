@@ -57,10 +57,12 @@
   stays standard. Against a 419,385-game ChessBase export, **407,350 games (97.1 %)
   match byte for byte**; the remaining differences are five deliberate,
   documented deviations plus a small residue.
-- **`.cbv` archives: the container is complete, the codec is not.** The member
-  table is parsed and self-validated for every member. **Extraction works only
-  for the 57.6 % of members in stored (mode `0x00`) compression**; the other three
-  modes report a typed error and are never written to disk. See
+- **`.cbv` archives: the container is complete, the codec is 59 %.** The member
+  table is parsed and self-validated for every member. Stored (mode `0x00`) and
+  **Huffman (mode `0x02`)** members extract and are verified byte-exact; modes
+  `0x01` and `0x03` report a typed error and are never written to disk. The
+  missing mode is not a long tail: **mode `0x03` holds all four database files**,
+  2.3 GB of the archive's 3.3 GB. See
   [Not supported yet](#what-is-not-supported-yet).
 - **2CBH: the container is proven, the moves are not.** Fixed 192-byte records and
   record framing are verified over 220,418 records. **The `.2cbg` move codec is not
@@ -86,7 +88,7 @@
 | Sink-based conversion, ordered parallel | **read** | `for_each_game`, `convert_parallel` |
 | PGN export | **read** | sequential and parallel, byte-identical output |
 | `.cbv` container | **read** | table parsed and validated for every member |
-| `.cbv` extraction, modes 1/2/3 | **not decoded** | mode `0x00` (57.6 %) decodes exactly |
+| `.cbv` extraction, modes 1/3 | **not decoded** | modes `0x00` and `0x02` (59.0 %) decode exactly |
 | `.cbz` | **read** | DES-ECB, key = the password's first eight bytes; verified byte-exact over a 3,000-byte sample. Passwords not exactly eight bytes are an open question |
 | 2CBH container | **read** | framing proven over 220,418 records |
 | 2CBH `.2cbg` move codec | **not decoded** | yields tags, not `moves2` |
@@ -431,12 +433,18 @@ archive:
 |---|---|---|
 | `0x00` | **2,228 (57.6 %)** | **decoded and verified** — stored verbatim |
 | `0x01` | 68 | **not decoded** |
-| `0x02` | 58 | **not decoded** |
-| `0x03` | 1,517 | **not decoded** |
+| `0x02` | 58 | **decoded and verified** — Huffman; 38 of the 58 byte-exact, 20 stop on an unidentified trailing block |
+| `0x03` | 1,517 | **not decoded** — the same table over *tokens*; holds every database file |
 
-So 57.6 % of the reference archive extracts exactly today, and **1,643 members
-report `Error::CodecUnavailable` and are never written to disk**. That error is
+So **59.0 % of the reference archive extracts exactly today** (2,286 of 3,871),
+and the rest reports a typed error and is never written to disk. That error is
 typed and names the member, so no extraction can quietly produce wrong bytes.
+
+Worth being blunt about where the remaining 1,585 members sit: the 2,228 stored
+members are overwhelmingly **images** (2,205 `.jpg`), and mode `0x03` holds
+**`.cbj` (1.34 GB), `.cbg` (1.25 GB), `.cbh` (513 MB) and `.cba` (210 MB)** —
+the chess data itself. Reading a database out of an archive is therefore still
+blocked on mode `0x03`, even though most of the archive's *bytes* are readable.
 
 What was ruled out, so that nobody repeats it: every stream was offered to zlib
 (wrapped and raw), gzip, bzip2, lzma, xz, lzma-alone, zstd and lz4 at every

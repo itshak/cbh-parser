@@ -91,7 +91,7 @@ fn sample() -> Vec<Fixture> {
         Fixture::stored("db.cbg", b"move records"),
         Fixture::stored("db.bmp\\0.bmp", b"first bitmap"),
         Fixture::stored("db.bmp\\1.bmp", b"second bitmap"),
-        Fixture::compressed("db.cba", b"annotations", Mode::HUFFMAN),
+        Fixture::compressed("db.cba", b"annotations", Mode::LZ),
     ]
 }
 
@@ -231,7 +231,22 @@ fn a_member_in_an_unresolved_mode_reports_the_codec_as_unavailable() {
     assert!(!a.can_decode(m).unwrap());
     match a.decode(m) {
         Err(Error::CodecUnavailable { member, mode, .. }) => {
-            assert_eq!((member.as_str(), mode), ("db.cba", Mode::HUFFMAN))
+            assert_eq!((member.as_str(), mode), ("db.cba", Mode::LZ))
+        }
+        other => panic!("expected CodecUnavailable, got {other:?}"),
+    }
+}
+
+#[test]
+fn mode_one_is_still_not_decoded() {
+    let fixtures = vec![Fixture::compressed("only.cba", b"annotations", Mode::MODE_1)];
+    let path = temp("mode1", &build(&fixtures));
+    let a = Archive::open(&path).unwrap();
+    let m = a.find("only.cba").unwrap();
+    assert!(!a.can_decode(m).unwrap());
+    match a.decode(m) {
+        Err(Error::CodecUnavailable { member, mode, .. }) => {
+            assert_eq!((member.as_str(), mode), ("only.cba", Mode::MODE_1))
         }
         other => panic!("expected CodecUnavailable, got {other:?}"),
     }

@@ -43,6 +43,10 @@ macro_rules! archive_or_skip {
 
 /// The measured facts of the reference archive.
 const MEMBERS: usize = 3_871;
+/// Members whose stream is stored verbatim.
+const STORED_MEMBERS: usize = 2_228;
+/// Members whose stream is Huffman-coded, and which this build decodes.
+const HUFFMAN_MEMBERS: usize = 58;
 const SIZE: u64 = 1_739_924_298;
 const DIRECTORY_END: u64 = 0xA37FB;
 const RECORD: u64 = 173;
@@ -149,7 +153,9 @@ fn a_stored_member_of_the_reference_archive_decodes_exactly() {
     let Some(beside) = path.parent() else { return };
     let mut checked = 0;
     for member in a.list().iter().filter(|m| m.is_asset()) {
-        if !a.can_decode(member).unwrap_or(false) {
+        if a.stream(member).ok().and_then(|s| Head::parse(member.name().as_ref(), &s).ok()).map(|h| h.mode())
+            != Some(codec::Mode::STORED)
+        {
             continue;
         }
         let Some((folder, file)) = member.name().split_once('\\') else { continue };
@@ -186,6 +192,13 @@ fn stored_records_whose_stream_is_shorter_than_their_size_are_reported() {
         if !a.can_decode(member).unwrap_or(false) {
             continue;
         }
+        // only a stored stream is the member's own length; a Huffman one is
+        // shorter by construction and is not a "short record"
+        if a.stream(member).ok().and_then(|s| Head::parse(member.name().as_ref(), &s).ok()).map(|h| h.mode())
+            != Some(codec::Mode::STORED)
+        {
+            continue;
+        }
         let Ok(stream) = a.stream(member) else { continue };
         if (stream.len() as u64).saturating_sub(codec::HEAD as u64) != member.size() {
             short.push(member.name().to_owned());
@@ -196,20 +209,36 @@ fn stored_records_whose_stream_is_shorter_than_their_size_are_reported() {
     assert_eq!(short.len(), 9, "the nine measured records: {short:?}");
 }
 
+/// The reference archive's mode census, as measured, and the number of members
+/// this build can decode.
+///
+/// `STORED_MEMBERS` and `HUFFMAN_MEMBERS` are what the mode byte says. A member
+/// this build cannot *finish* decoding — 20 of the Huffman ones stop on a
+/// trailing block that is not identified — reports an error and is never
+/// written, so the shortfall is safe rather than silent.
 #[test]
 fn the_compression_modes_of_the_reference_archive_are_the_measured_ones() {
     let path = archive_or_skip!();
     let a = Archive::open(&path).expect("open the reference .cbv");
-    let (mut stored, mut unresolved) = (0usize, 0usize);
+    let (mut stored, mut huffman, mut unresolved) = (0usize, 0usize, 0usize);
     for m in a.list() {
-        if a.can_decode(m).unwrap_or(false) {
-            stored += 1;
-        } else {
-            unresolved += 1;
+        match a.stream(m).ok().and_then(|s| Head::parse(m.name().as_ref(), &s).ok()).map(|h| h.mode()) {
+            Some(codec::Mode::HUFFMAN) => huffman += 1,
+            Some(codec::Mode::STORED) => stored += 1,
+            _ => unresolved += 1,
         }
     }
-    assert_eq!(stored, 2_228, "the stored members, as measured");
-    assert_eq!(unresolved, MEMBERS - 2_228, "the members in the unresolved modes");
+    assert_eq!(stored, STORED_MEMBERS, "the stored members, as measured");
+    assert_eq!(huffman, HUFFMAN_MEMBERS, "the Huffman members, as measured");
+    assert_eq!(unresolved, MEMBERS - STORED_MEMBERS - HUFFMAN_MEMBERS, "the rest");
+
+    // `can_decode` reads only a stream head, so it counts every member whose
+    // mode has a registered codec: stored plus Huffman, 2,286. Fully decoding
+    // all 58 Huffman members is the slow part and is not done here; 20 of them
+    // stop on a trailing block this build has not identified, and they report an
+    // error rather than bytes. See `docs/format-spec-cbv.md`.
+    let decodable = a.list().iter().filter(|m| a.can_decode(m).unwrap_or(false)).count();
+    assert_eq!(decodable, STORED_MEMBERS + HUFFMAN_MEMBERS, "every member whose mode has a codec");
 }
 
 #[test]

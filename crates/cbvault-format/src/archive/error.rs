@@ -35,6 +35,17 @@ pub enum Error {
         /// The codec that was offered the stream and declined it.
         codec: &'static str,
     },
+    /// A compressed stream ended before the member table's promised bytes.
+    Truncated {
+        /// The member whose stream ran out.
+        member: String,
+        /// The offset the missing bytes would have started at.
+        at: u64,
+        /// How many bytes were needed.
+        needed: usize,
+        /// How many bytes the stream had.
+        have: usize,
+    },
     /// A member's name does not name a location inside the destination
     /// directory, so extraction refused to write it.
     UnsafeName {
@@ -49,6 +60,7 @@ impl Error {
         match self {
             Error::Format(e) => e.path(),
             Error::CodecUnavailable { .. } | Error::UnsafeName { .. } => None,
+            Error::Truncated { .. } => None,
         }
     }
 
@@ -73,6 +85,10 @@ impl fmt::Display for Error {
             Error::Format(e) => write!(f, "{e}"),
             Error::CodecUnavailable { member, mode, codec } => {
                 write!(f, "{member}: mode {mode:#04x} cannot be decoded: the {codec} codec does not handle it")
+            }
+            Error::Truncated { member, at, needed, have } => {
+                let who = if member.is_empty() { "the stream".to_string() } else { member.clone() };
+                write!(f, "{who}: the stream ends at byte {at:#x} - {needed} more bytes were needed, {have} were there")
             }
             Error::UnsafeName { member } => {
                 write!(f, "{member}: the member's name does not stay inside the destination directory")

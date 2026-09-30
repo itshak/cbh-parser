@@ -45,6 +45,7 @@ use crate::file::DbFile;
 pub mod codec;
 pub mod entry;
 pub mod error;
+pub mod huffman;
 
 mod report;
 
