@@ -125,14 +125,15 @@ authoritative list of what is missing.
 These are real and are not fixed; each is described in `README.md` § "What is not
 supported yet".
 
-- **`.cbh` verify is faster than the ancestor it was ported from, at every thread
-  count.** Both tools at the same thread count on 11,151,119 records:
-  **39.84 s against 46.79 s** on one thread (1.17×), **10.42 s against 12.18 s**
-  on four, and **4.93 s against 5.91 s** on ten (1.20×). Two gaps remain: PGN
-  export is ~4x slower (0.22 s against 0.05 s on TWIC 1664, same 9,114 games
-  from both), and our `verify` peaks at 1,520 MB against the ancestor's 14 MB
-  because `DbFile::read` copies the whole range instead of lending the mapping's
-  slice.
+- **`.cbh` reading beats the ancestor it was ported from on both paths.** Both at
+  the same thread count on 11,151,119 records: `verify` 39.84 s against 46.79 s
+  single-threaded (1.17x) and 4.93 s against 5.91 s at ten threads (1.20x);
+  PGN export 11.99 s against 38.11 s at eight threads (3.2x), using 81 MB
+  against its 100 MB. The parallel export meets the spec budget of at most 25 s
+  and under 8 GiB with room. Single-threaded PGN export is the one path where
+  the ancestor leads. On memory we allocate ~265 MB to replay 883,141,297 moves;
+  the 1,520 MB peak is dominated by 1,255 MB of mapped `.cbg` pages, which a
+  control program that only maps and reads the file also incurs.
 - **The 2CBH `.2cbg` move codec is not decoded**, and a specific list of 2CBH
   header fields remains unknown. A 2CBH database yields tags and annotations but
   no `moves2`.
