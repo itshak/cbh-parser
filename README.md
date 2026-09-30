@@ -71,6 +71,9 @@
   is the honest one. The container itself is solid: the member table is parsed
   and self-validated for all 3,871 members, and `.cbz` works fully. See
   [Not supported yet](#what-is-not-supported-yet).
+  For the full landscape of what exists, what is established, and which compression
+  family the unsolved mode belongs to, see
+  [`docs/research/02-cbv-state-of-the-art.md`](docs/research/02-cbv-state-of-the-art.md).
 - **2CBH: the container is proven, the moves are not.** Fixed 192-byte records and
   record framing are verified over 220,418 records. **The `.2cbg` move codec is not
   decoded**, so a 2CBH database yields its game list and tags today, but no moves.
