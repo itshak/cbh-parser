@@ -11,13 +11,20 @@ implemented in `cbvault_format::archive`.
   additionally compared our parse against the *output* of `uncbv` run as a
   separate process. No source of any implementation was read, in this pass or in
   this one; no GPL or unlicensed code, text or table was consulted.
+- **[clean-room]** — the member codec's rules, which came later, from the
+  **two-room clean room** (`docs/provenance.md`): one agent read the GPL reference
+  and wrote `docs/format-spec-uncbv.md`, a specification of *facts*; a second
+  agent, which never saw the reference, implemented from that specification alone
+  (`archive/{codec,lz,huffman,blocks}.rs`). The rules below are stated here in our
+  own words, and the normative form is `docs/cbv-reference.md`.
 
-**Status.** The container is complete and fully verified. The member-stream
-compression is **partly open**: one of the four modes is decoded and verified,
-three are not, and this document says exactly how far the analysis got and why.
-The `.cbz` scheme is **established** — DES-ECB, key = the password's first eight
-bytes — from a sample-and-plaintext pair in the oracle's fixtures. What remains
-open is narrower and is listed under `.cbz` below.
+**Status.** The container is complete and fully verified, and so is the codec:
+**all four block modes are decoded**, and every member of the reference archive
+now comes out byte-identical to the reference process's own output — 3,871 of
+3,871, and 100 % of its 3.61 GB. The `.cbz` scheme is **established** — DES-ECB,
+with the key derived from the password by one of three rules depending on its
+length. What remains open is narrow, none of it blocking, and is listed at the
+end.
 
 ## The sample
 
@@ -27,6 +34,7 @@ open is narrower and is listed under `.cbz` below.
 | Size | 1,739,924,298 bytes (`0x67B5234A`) |
 | SHA-256 | `d3ae0bcfb8c914c347a32b1478de830a69ae6c058448e6bc7610d82141b837c2` |
 | Members | 3,871 |
+| Decoded | **3,607,876,417 bytes** (3.61 GB), every one of them byte-identical to the reference process's output |
 
 The SHA-256 was recomputed for this document and matches the facts pass. The
 archive is copyrighted and is never committed; nothing derived from it beyond
@@ -37,7 +45,7 @@ the numbers below is.
 ```
 [0x00]      magic            08 00 1F 0F AD 00 03 00        8 bytes
 [0x08]      member table     3,871 records of 173 bytes
-[0xA37FB]   data pool        one stored stream per member
+[0xA37FB]   data pool        one stream of blocks per member
 ```
 
 - The table ends exactly where the first stream starts, and the last stream
@@ -136,12 +144,15 @@ fact to report, not as damage.
 
 ## The data pool
 
-Each member's stream begins with a **five-byte head**: **[bytes]**
+Each member's stream is a run of **blocks**, and it begins with the first
+block's head — which is why a stream looks like it opens with a five-byte head:
+**[clean-room]**
 
 ```
-[0..4)   four unnamed bytes
-[4]      the compression mode
-[5..)    the stream proper
+[0..2)   u16 LE payload length
+[2..4)   two unnamed bytes
+[4]      the compression mode  (the payload's first byte)
+[5..)    the payload proper
 ```
 
 The four bytes are a function of the member's **content alone** — two members
@@ -152,40 +163,70 @@ final-XORs, Adler-32, Fletcher-32, FNV-1 and FNV-1a, djb2 and djb2-xor, sdbm,
 Jenkins one-at-a-time, MurmurHash3, and plain 32-bit sums. Their meaning is
 **open**; the reader preserves them in `Head::opaque()` and does not use them.
 
+The negative result survives the codec being solved, and it now has a second
+reading. Bytes `0..2` are the **first block's payload length**, so they are a
+length and not a digest — which is consistent with their being content-determined
+and nothing more. Bytes `2..4` are the block head's **unnamed word**, which no
+decoder decodes and nothing verifies; across the reference archive's 61,211
+blocks it takes **39,463 distinct values**. It is not a checksum.
+
 ### Compression modes
 
-The mode byte takes four observed values: **[bytes]**
+The mode byte takes four values, and all four are decoded and identified:
+**[clean-room]**
 
-| mode | members | what the stream is |
+| mode | what the payload after the mode byte is | status |
 |---|---|---|
-| `0x00` | **2,228** (57.6 %) | **stored** — bytes 5 on are the member's content, verbatim |
-| `0x01` | 68 | compressed — **not identified** |
-| `0x02` | 58 | compressed — **not identified** |
-| `0x03` | 1,517 | compressed — **not identified** |
+| `0x00` | **stored** — the payload is the member's output, verbatim | decoded, verified |
+| `0x01` | **LZ** — a stream of groups, each a 16-bit control word and up to 16 tokens | decoded, verified |
+| `0x02` | **Huffman** — one explicit-path code, a 256-entry table | decoded, verified |
+| `0x03` | **Huffman, then LZ** — the Huffman output *is* an LZ stream | decoded, verified |
 
-**Stored mode is verified by decoding.** For **2,219 of the 2,228** stored
-members the local copy of the extracted set is byte-identical to the stream from
-offset 5 on. **[bytes]** So 57.6 % of the reference archive decodes exactly and
-needs no codec at all.
+Between them they cover every block of the reference archive, all **61,211**,
+and every member decodes: **3,871 of 3,871** members and **100 %** of the
+**3,607,876,417** decoded bytes match the reference process's own output
+byte for byte.
 
-The other nine stored members are `.bmp` and `.jpg` assets whose streams diverge
-from the local copies at content offset **61,440** — the same boundary as the
-rewritten excerpt, so it is the *local* copies that moved, not the streams.
-**[bytes]** All nine also carry a `size` their body does not reach: six are
-short — `bmp\116.bmp` declares 156,054 bytes over a 125,444-byte body, the
-largest gap being `bmp\228.bmp` at 682,330 over 620,177 — and three
-(`1905britishchamp_photo.jpg`, `1926brit_subsid_xtable-1.jpg`,
-`Tabelle-Poikovsky.jpg`) are five bytes *over*. The stored codec checks the
-body length against the record and reports a corrupt stream, so **none of the
-nine is written out as the wrong bytes**. Which side is authoritative is **open**
-(they are exactly the members the facts pass also flags as rewritten locally).
+> **The mode is per *block*, not per member.** This is the single most
+> consequential fact in the codec, and the reason the mode byte sits at stream
+> offset 4: that offset is the first byte of the *first block's payload*.
+> **130 members of the reference archive mix modes across their blocks.**
+> A reader that takes the mode from the first block and applies it throughout
+> decodes 130 members wrongly. Every block carries its own. **[clean-room]**
 
-## The compression: what was tried, and what is still open
+Two further rules that a first reading of the bytes gets wrong, and that the
+implementation had to have right to reach parity:
 
-The facts pass left this open and named a route: start from the smallest text
-pair, identify block framing and mode flags by differential analysis, then
-confirm on medium and large members. That analysis was carried out. It did not
-crack the codec, and the negative results are as useful as the positive ones.
+- The Huffman decoded length is **big-endian** — the one length in the whole
+  container that is not little-endian.
+- The LZ back-reference window spans the **whole member**, not one block, and a
+  copy is a **unit copy**: it may overlap its own destination. **34,300**
+  back-references in the reference archive do. **[clean-room]**
+
+**Stored mode is verified by decoding.** Every wholly stored member of the
+reference archive produces **exactly** the `size` its record claims — **zero**
+exceptions. **[clean-room]**
+
+> This section used to report **nine** stored members whose stream length
+> disagreed with their record, six short and three five bytes over. That count
+> was an artefact, and it is recorded here so it cannot creep back: the earlier
+> reader treated a stream as *one five-byte head followed by content* and
+> subtracted five from `packed`. A stream is in fact a run of blocks with a
+> four-byte head each, so any member carrying more than one block came out short
+> by a fixed amount, and a boundary landed mid-stream read as five bytes over.
+> Reading the framing removes every one of them. **The number is zero and it
+> must stay zero.** The separate observation that the *local copies* of some
+> `.bmp`/`.jpg` assets diverge from 61,440 on is a fact about this machine, not
+> about the archive, and is unchanged.
+
+## The compression: what was ruled out, and what it was worth
+
+The facts pass left the codec open and named a route: start from the smallest
+text pair, identify block framing and mode flags by differential analysis, then
+confirm on medium and large members. That analysis was carried out twice — once
+by statistical inference, which did not crack it, and once under the two-room
+protocol, which did. The negative results are as useful as the positive ones and
+are kept, because each one is a rule out for the next person.
 
 ### What was ruled out
 
@@ -205,6 +246,13 @@ crack the codec, and the negative results are as useful as the positive ones.
    plaintext bytes, which is the signature of a token stream whose boundaries
    are not byte-aligned. The block framing the change plan calls for is
    therefore not a plain byte-level LZ.
+
+   > **How this is now read.** The result stands, and the framing explains it:
+   > an LZ back-reference reaches across the **whole member**, so a member's
+   > packed bytes and its output bytes share no grid at all — not because the
+   > tokens are bit-oriented, but because the comparison was made at the wrong
+   > level. The alignment was never going to succeed on any of these members.
+
 3. **The recurring `03` at stream offset 4 is not a mode flag.** It is the mode
    byte's neighbourhood, and it is `0x00` for every stored member.
 4. **Not a "literal run, `0x00` means back-reference" LZ.** The control bytes
@@ -242,25 +290,26 @@ member's plaintext: **[bytes]**
 | `cbl` | 3 | 4,167 | 29,138 | 2 |
 | `ini` | 3 | 1,970 | 7,174 | 3 |
 
-That is a clean split and it is the most useful thing this pass established:
-**mode 3 carries no plaintext at all** (longest verbatim run 2–3 bytes on a
-29 KB member), which is the signature of an entropy coder — consistent with the
-change plan's "Huffman mode". **Mode 1 carries short literal runs** (16 bytes),
-the signature of an LZ whose literals are not byte-aligned. Modes 1 and 2 are
-close in size behaviour and may be one scheme with two parameters, or two
-schemes; nothing here distinguishes them.
+That is a clean split, and it is what pointed at the answer: **mode 3 carries no
+plaintext at all** (longest verbatim run 2–3 bytes on a 29 KB member), the
+signature of an entropy coder; **mode 1 carries short literal runs** (16 bytes),
+the signature of an LZ. The table is kept as the record it was: it was measured
+before the grammar was known, and every prediction it made held. Modes 1 and 2
+"may be one scheme with two parameters, or two schemes" — the answer was two
+schemes, and a third combination nobody had listed: mode `0x03` is mode `0x02`'s
+Huffman output fed straight into mode `0x01`'s LZ.
 
-### Why it is still open
+### Why it was open, and what closed it
 
-The single missing fact is the block framing, and it cannot be recovered from
-what is on this machine. The container's *only* plaintext-bearing redundancy —
-the excerpt — is a 35-to-105-byte slice, far too short to expose a block header,
-and its position in the content is not recorded anywhere the reader can see, so
-it cannot be used to align a stream against its plaintext. Proving a hypothesis
-needs a candidate grammar that reproduces a whole member byte for byte, and
-without the framing the hypothesis space is unbounded: mode 1's 16-byte literal
-runs are consistent with a bit-oriented LZ with any flag width, any length code
-and any distance code.
+The single missing fact was the block framing, and it could not be recovered
+from what was on this machine. The container's *only* plaintext-bearing
+redundancy — the excerpt — is a 35-to-105-byte slice, far too short to expose a
+block header, and its position in the content is not recorded anywhere the
+reader can see, so it cannot be used to align a stream against its plaintext.
+Proving a hypothesis needs a candidate grammar that reproduces a whole member
+byte for byte, and without the framing the hypothesis space is unbounded: mode
+1's 16-byte literal runs are consistent with a bit-oriented LZ with any flag
+width, any length code and any distance code.
 
 What was searched, on `BaseText.css` (the smallest exact pair, mode 1, 413
 packed bytes against 911 plaintext bytes): **[bytes]**
@@ -271,12 +320,25 @@ packed bytes against 911 plaintext bytes): **[bytes]**
 | bit-oriented LZ, Elias-gamma length and/or distance | 2 bit orders × 2 flag values × 3 length codes × 3 distance codes × 4 length biases × 3 distance biases × 3 window sizes | 1,296 |
 | byte-oriented LZ, control byte selecting a literal run or a (length, distance) | 2 flag conventions × 4 length biases × 3 length widths × 3 distance widths × 3 maximum run | 216 |
 
-None reproduced the member. A decoder has to explain the byte-level
-misalignment the shortest-edit alignment above rules out, and nothing tried does.
+None reproduced the member, and none could have: all three families assume the
+packed bytes and the output bytes can be lined up against each other, and the
+whole-member back-reference window means they cannot.
 
-**The codec is not implemented and nothing pretends otherwise.** A member in
-mode 1, 2 or 3 reports `Error::CodecUnavailable { member, mode, codec }` and is
-never written to disk. The seam is one trait:
+**What closed it was the two-room protocol**, and the discipline is the point.
+One agent read the GPL reference and wrote down only *facts* — offsets, widths,
+constants, algorithms as procedures, observable error conditions — in
+`docs/format-spec-uncbv.md`. A second agent, given that document and nothing
+else, implemented it. The implementation never saw the reference; the parity
+runs were done by neither. `docs/research/03-clean-room-audit.md` is the audit
+trail, `docs/cbv-reference.md` the normative format description, and
+`docs/provenance.md` the regime entry.
+
+### The codec is implemented
+
+`archive::{codec,lz,huffman,blocks}` decode all four modes. `Error::CodecUnavailable`
+is still in the error type and still returned for a mode this build does not
+know, but on a `.cbv` written by ChessBase that path is not reached: every mode
+that occurs is decoded. The seam stayed one trait, unchanged:
 
 ```rust
 pub trait Codec {
@@ -286,35 +348,38 @@ pub trait Codec {
 }
 ```
 
-`codec::codecs()` returns the registered codecs; adding one for a mode is the
-whole of the remaining work, with no change to `Archive` or to extraction.
+A registered codec that fails — a Kraft sum that is not 1, a block whose length
+runs past the stream, a reference before the start of the member — is a typed
+error, never a partial write.
 
-### The route to closing it
+### The route that was taken
+
+Kept because the reasoning is reusable, and because each step is checkable
+against what happened:
 
 1. Obtain a mode-1 member with **two** known plaintexts that share a long
    prefix, or a member and its own excerpt at a known content offset, so that a
    candidate grammar can be scored over more than one alignment. The reference
-   archive's stored members are already usable as plaintext oracles for 57.6 %
-   of the file; what is missing is a *compressed* member whose plaintext is also
-   a stored member.
-2. Use the **first 16 bytes** of a mode-1 body, which are always a literal run,
-   to fix the bit phase of the token stream. That single alignment then makes
-   the following token's boundary computable, which is what makes a grammar
-   search tractable.
-3. Only then look for the block header: with the token phase fixed, a
-   discontinuity in token spacing marks a block boundary, and the flags around
-   it are the "block flags" the change plan names.
-4. Mode 3 is a separate problem and probably easier once mode 1 is understood:
-   a canonical Huffman code can be recovered from the bit stream alone by
-   parsing candidate code-length assignments, since a 7,174-symbol text stream
-   over ~70 distinct symbols is heavily constrained.
+   archive's stored members are usable as plaintext oracles; what was missing is
+   a *compressed* member whose plaintext is also a stored member.
+2. Use the **first 16 bytes** of a mode-1 body to fix the phase of the token
+   stream, then let a discontinuity in token spacing mark a block boundary — the
+   "block flags" the change plan names.
+3. Treat mode 3 separately: a canonical Huffman code can be recovered from the
+   bit stream alone by parsing candidate code-length assignments.
+
+Steps 1 and 2 did not converge by inference — a 7,174-symbol stream over ~70
+distinct symbols is heavily constrained only if the code is canonical, and it is
+not. What made it tractable was reading the framing as a **fact** instead of
+inferring it: with the block header and the mode-per-block rule in hand, each
+mode was a grammar to be written down rather than searched for.
 
 ## `.cbz`
 
 **Established.** A `.cbz` is a `.cbv` whose every byte is enciphered with
-**DES in ECB**, under a key that is **the password's first eight bytes**.
-There is no plaintext header, no salt and no IV: the container's own header is
-enciphered like everything else.
+**DES in ECB**, under a key **derived from the password by one of three rules,
+depending on the password's length** (below). There is no plaintext header, no
+salt and no IV: the container's own header is enciphered like everything else.
 
 ### The evidence
 
@@ -371,61 +436,119 @@ rather than the file being deciphered whole: reading a member aligns down to a
 block boundary, deciphers that window, and slices. Extraction holds one member
 at a time.
 
-### Open: passwords that are not eight bytes
+### The key: three rules, not one
 
-The oracle's behaviour for a password whose length is not exactly eight is
-**internally inconsistent**, and is deliberately not reproduced:
+**This section was wrong once, and the correction is the point.** The reader
+originally took the key to be the password's first eight bytes, **zero-padded**
+below eight and **truncated** above it — the obvious guess. Both are wrong, and
+a wrong key does not fail loudly: it is still a valid DES key, so it deciphers
+the file into plausible-looking noise and the only symptom is a header that does
+not look like a header. The rules are: **[clean-room]**
 
-- seven bytes → it panics (`index out of bounds: the len is 8 but the index is 8`);
-- nine or more → it deciphers under a key that is **not** the first eight bytes,
-  and the rule was not identified. Tested and rejected against the oracle's own
-  output: first-8, last-8, cyclic, reversed, XOR-fold, sum-fold, bytes 8..16,
-  all 8! position permutations, whole-byte transforms (NOT, XOR-FF, add/sub 1,
-  bit-reverse, nibble-swap, case), double-DES, and MD5/SHA-1/SHA-256 of the
-  password with and without a trailing newline;
-- `password22` and `password33` produce **byte-identical** output, while
-  `passwordAA`, `passwordAB`, `password99`, `password11` and `passworda1` —
-  same length, same eight-byte prefix — each produce their own.
+| password length | the eight key bytes are |
+|---|---|
+| exactly 8 | those eight bytes, unchanged |
+| fewer than 8 | the password **repeated** — concatenated with itself — until at least 8 bytes, then the first eight |
+| more than 8 | **folded**: eight accumulators start at zero; for each byte *i* of the password, accumulator `i mod 8` is doubled and then exclusive-ORed with that byte, mod 256 |
 
-A scheme with an unexplained collision is a reason to distrust that path, not a
-finding about the format. This reader uses the first eight bytes, zero-padded
-for a shorter password, and says so. **Whether real ChessBase agrees for
-passwords longer than eight bytes is open**, and no sample that settles it was
-found.
+So `pass` keys the sample with `passpass`, **not** `pass\0\0\0\0`. The three
+cases are three rules, not one rule with a special case.
+
+Verified against the reference's own sample/plaintext pairs, one per rule:
+
+| password | length | resulting key (hex) | result |
+|---|---|---|---|
+| `password` | 8 | `70 61 73 73 77 6F 72 64` | deciphers to the container magic |
+| `pass` | 4 | `70 61 73 73 70 61 73 73` | deciphers to the container magic |
+| `my long password` | 16 | `AA 93 33 AB A9 B3 BC 24` | deciphers to the container magic |
+
+Each sample deciphers with its own key and yields the magic
+`08 00 0C 00 AD 00 03 00`; each deciphers to noise with the other two.
+
+**What the old "inconsistency" was.** The earlier text recorded that the
+reference panics below eight bytes, deciphers under an unidentified key above
+them, and that `password22` and `password33` give byte-identical output while
+same-prefix passwords each differ. None of that is a property of the format; it
+was a hypothesis — "first eight bytes, zero-padded" — that had never been tested
+against a sample whose plaintext is known. Tested, both cases have a definite
+answer, and the collision disappears: the fold's doubling makes each accumulator
+depend on how many bytes have been folded into it, so a tenth byte cannot
+overwrite the first, and two ten-byte passwords sharing an eight-byte prefix
+produce **different** keys. The whole-byte-transform and hash candidates rejected
+against the oracle's output stay rejected; they were never the rule.
+
+**What remains open is narrower.** Whether *real ChessBase* — rather than the
+reference implementation — derives keys this way is not established, and no
+sample settles it.
 
 ## Open and unknown — the list
 
-Everything below is unresolved. None of it is guessed at in the code.
+Everything below is unresolved. None of it is guessed at in the code, and none
+of it blocks extraction.
 
 | # | Open item | Why it is open | What it blocks |
 |---|---|---|---|
-| 1 | The block flags of the member streams | the framing is not recoverable from the available pairs (§ *Why it is still open*) | extraction of 1,643 members |
-| 2 | The LZ mode (stream modes `0x01`, `0x02`) | not a byte-aligned LZ; the literal phase cannot be fixed from the available pairs | as above |
-| 3 | The Huffman mode (stream mode `0x03`) | no plaintext survives in the stream at all, so there is nothing to align against | as above |
-| 4 | The meaning of the stream's four opaque bytes | not any standard checksum tried; a function of content alone | integrity checking of a member stream |
-| 5 | The purpose of the excerpt | its content position is not recorded, and 35–105 bytes cannot expose a block header | as above |
-| 6 | The meaning of the 9-byte segment | 26 values, no invariant beyond three fixed bytes | nothing — the reader does not use it |
-| 7 | The nine stored records whose stream length disagrees with their `size` | the local copies were rewritten from 61,440 on; which side is authoritative is not established | extracting those eight members |
-| 8 | The `.cbz` key rule for passwords **longer than eight bytes** | the oracle is self-inconsistent here (see above) | `.cbz` with a long password |
-| 9 | Whether real ChessBase agrees with the first-eight-bytes rule for long passwords | no second sample with a known plaintext | `.cbz` with a long password |
-| 11 | Whether the 173-byte stride and 128-byte name field hold for other archives | verified on one archive | reading a differently-built `.cbv` |
+| 1 | The block head's **unnamed word** (stream offset 2) | no decoder decodes it and nothing verifies it; **39,463 distinct values** across 61,211 blocks, so it is not a checksum | nothing — every decoder skips it |
+| 2 | The meaning of the stream's four head bytes as a whole | bytes `0..2` are the first block's payload length; `2..4` is item 1 | nothing |
+| 3 | The purpose of the excerpt | its content position is not recorded, and 35–105 bytes cannot expose a block header | nothing — decoding does not need it |
+| 4 | The meaning of the 9-byte segment | 26 values, no invariant beyond three fixed bytes | nothing — the reader does not use it |
+| 5 | Whether the three `.cbz` key rules are ChessBase's own | verified against the reference implementation on three samples; no ChessBase-written `.cbz` with a known plaintext exists here | nothing |
+| 6 | Whether the 173-byte stride and 128-byte name field hold for other archives | verified on one archive | reading a differently-built `.cbv` |
 
-Item 11 is worth stating plainly: the reader *derives* the member count from
+Item 6 is worth stating plainly: the reader *derives* the member count from
 `(first_offset − 8) / 173`, so a container built with a different stride is
 rejected with a clear message rather than misparsed. That is a deliberate
 choice: a wrong guess about the stride would produce plausible nonsense, and a
 typed refusal is safer than either.
 
+**Closed since this list was written**, and recorded here so the reasoning is not
+repeated: the block framing and the mode-per-block rule; modes `0x01`, `0x02` and
+`0x03`; the Huffman decoded length's byte order; the LZ back-reference window and
+its unit copy; the `.cbz` key rules for passwords shorter *and* longer than eight
+bytes. And one item was **never open** — the "nine stored records whose stream
+length disagrees" was an artefact of reading a block run as a single head. It is
+zero, and the count is in § *Compression modes* with its origin explained.
+
+## Parity and performance
+
+Parity is the acceptance test and it is measured, not argued:
+
+| corpus | members | result |
+|---|---|---|
+| `twic1134.cbv` | 13 | **13/13** byte-identical to the reference process |
+| `Mega Database 2025.cbv` | 3,871 | **3,871/3,871** byte-identical; **100 %** of its 3,607,876,417 decoded bytes |
+| the three `.cbz` samples | 12 each | **12/12** byte-identical, each under its own key rule |
+
+Extraction of the 1.74 GB archive to disk, on a 10-core machine:
+
+| | time | throughput |
+|---|---|---|
+| the reference process (`uncbv`) | 66.4 / 66.8 / 70.3 s | 51–54 MB/s |
+| `cbvault`, 10 threads | **7.1 s** | **504 MB/s** |
+| `cbvault`, 1 thread | 15.99 s | 226 MB/s |
+
+Decode-only, which measures the codec rather than the disk: 13.87 s single
+threaded (260 MB/s) and 6.43 s at 10 workers (561 MB/s). That is **≈9.4× faster
+than the reference process** end to end. The codec's own scaling and the
+per-worker figures are in `docs/cbv-reference.md` §9.4.
+
+Worth stating for what it is worth: **ChessBase publishes no speed claim for
+unarchiving `.cbv`.** Its only published figure is a *space* claim — "about 30 %
+to 50 %". So there is no vendor number to be faster or slower than; the
+comparison above is the only one available, and it is against another
+implementation.
+
 ## Verifying this document
 
 `cargo test -p cbvault-format` runs the container tests over archives the test
-code builds byte by byte, and — when `CBH_TEST_CBV` is set, or the repository's
-own git-ignored copy is present — re-checks every number above against the real
-1.74 GB archive: the 3,871 members, the first member and its offset, the table
-ending at `0xA37FB`, the last member ending at EOF, the three groups and their
-counts, contiguity within groups, the 2,228/1,643 mode split, the nine
-disagreeing records, and a byte-for-byte comparison of decoded stored members
-with the extracted set.
+code builds byte by block from the specification, and — when `CBH_TEST_CBV` is
+set, or the repository's own git-ignored copy is present — re-checks every number
+above against the real 1.74 GB archive: the 3,871 members, the first member and
+its offset, the table ending at `0xA37FB`, the last member ending at EOF, the
+three groups and their counts, contiguity within groups, the four modes across
+every block, the **zero** wholly-stored members whose length contradicts their
+record, and a byte-for-byte comparison of all 3,871 decoded members with the set
+the reference process extracted.
 
 The archive is opened read-only. Extraction writes only under a directory the
 caller names; a test asserts the archive's bytes are unchanged afterwards.

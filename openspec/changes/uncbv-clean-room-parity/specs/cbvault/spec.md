@@ -80,16 +80,21 @@ than excluded silently.
 
 ### Requirement: `.cbv` and `.cbz` archives are readable
 
-The library SHALL list and extract `.cbv` archives (header, member table,
-block-compressed and Huffman-coded members) and SHALL decrypt `.cbz` archives
-given the user password (legacy DES scheme), implementing the container
-**clean-room** from verified facts.
+The library SHALL list and extract `.cbv` archives (header, member table, and
+all four block modes: stored, LZ, Huffman, and Huffman-then-LZ) and SHALL decrypt
+`.cbz` archives given the user password (legacy DES scheme), implementing the
+container **clean-room** from verified facts.
 
-Extraction SHALL cover **every member** of a conforming archive. A member the
-reader cannot decode SHALL be reported as a typed error and never written; it
-SHALL NOT be counted as extracted, and the library's own reporting SHALL state
-the extractable share in **bytes** as well as in member count, because a large
-member count of small members is not progress toward reading a database.
+Extraction SHALL cover **every member** of a conforming archive, and the decoded
+bytes SHALL equal those of the reference implementation run as a separate
+process, on **every member of every test corpus**. A member the reader cannot
+decode SHALL be reported as a typed error and never written; it SHALL NOT be
+counted as extracted, and the library's own reporting SHALL state the extractable
+share in **bytes** as well as in member count, because a large member count of
+small members is not progress toward reading a database.
+
+The block mode SHALL be read **per block**, not per member, because a member's
+stream may switch mode between its blocks.
 
 #### Scenario: List members
 
@@ -106,6 +111,33 @@ member count of small members is not progress toward reading a database.
 
 - **WHEN** the password does not decrypt the archive
 - **THEN** the operation fails with a typed `WrongPassword` error.
+
+#### Scenario: A member's blocks mix modes
+
+- **WHEN** a member's stream switches mode between its blocks
+- **THEN** each block is decoded with the mode its **own** payload names, since
+  the mode belongs to a block rather than to a member.
+
+#### Scenario: A block names a mode the format does not define
+
+- **WHEN** a block's mode byte falls outside `0x00`–`0x03`
+- **THEN** the member is refused with a typed corruption error naming the offset,
+  because every defined mode is decoded and an unknown one is damage rather than
+  a missing feature.
+
+#### Scenario: A password that is not exactly eight bytes long
+
+- **WHEN** a `.cbz` is opened with a password shorter or longer than eight bytes
+- **THEN** the key is derived by **repeat**ing the password when it is shorter and
+  by **fold**ing it when it is longer, as the format specifies
+- **AND** the archive opens, verified against the reference's own samples for
+  each of the three rules.
+
+#### Scenario: A member name that would escape the destination
+
+- **WHEN** a member's name is absolute, or contains a `..` component
+- **THEN** the archive is refused **before any file is written**, so a refused
+  archive leaves nothing behind.
 
 #### Scenario: Reporting what the reader can do
 

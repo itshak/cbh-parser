@@ -3,25 +3,26 @@
 //! # What is established
 //!
 //! A `.cbz` is a `.cbv` whose every byte is enciphered with **DES in ECB**,
-//! under a key that is **the password's first eight bytes**. There is no
-//! plaintext header, no salt and no IV — the container's own header is
-//! enciphered like everything else, which is what makes the header the
-//! password check.
+//! under a key derived from the password by one of **three** rules, depending on
+//! the password's length: eight bytes are the key; a shorter password is
+//! **repeated**; a longer one is **folded**. There is no plaintext header, no
+//! salt and no IV — the container's own header is enciphered like everything
+//! else, which is what makes the header the password check.
 //!
-//! This is an observation, not an inference. `vendor/oracles/uncbv/tests/`
-//! carries `small.cbz` beside its plaintext `decrypted_small.cbv`; the scheme
-//! was determined against that pair and reproduces **all 3,000 bytes** of it.
-//! The evidence is written up in `docs/format-spec-cbv.md` and the change's
-//! `design.md`; the oracle's source was never read, only its output used.
+//! All of it is verified against **all three** of the reference's own `.cbz`
+//! samples, whose passwords are `password`, `pass` and `my long password` — one
+//! per key rule — and this reader deciphers all three byte for byte. The rules
+//! are stated field by field in `docs/cbv-reference.md` §9; the oracle's source
+//! was never read, only its output used.
 //!
-//! # What is open
+//! # Why the three rules matter more than they look
 //!
-//! The key rule for a password that is **not** exactly eight bytes long. This
-//! reader takes the first eight and zero-pads a shorter one. The reference
-//! extractor behaves inconsistently there — it panics below eight bytes and
-//! deciphers under an unidentified key above them — and that path was not
-//! copied. See the design note for the hypotheses that were tested and
-//! rejected.
+//! Getting a key rule wrong does not fail loudly. A wrong key is still a valid
+//! DES key, so it deciphers the file into plausible-looking noise rather than
+//! raising anything; the only symptom is that the first eight bytes do not
+//! happen to look like a container header. This reader once zero-padded a short
+//! password and truncated a long one — the obvious guess, and wrong in both
+//! directions. The reference's own three samples are what caught it.
 //!
 //! # Decrypting on demand
 //!
@@ -253,18 +254,55 @@ pub trait KeyDerivation {
 /// passing quietly.
 pub const SAMPLE_ENV: &str = "CBH_TEST_CBZ";
 
-/// The key a password produces: its first eight bytes, zero-padded.
+/// The key a password produces.
 ///
-/// This is the rule established in `docs/format-spec-cbv.md` and verified
-/// byte-exact over a whole sample. How the reference extractor behaves for a
-/// password that is *not* exactly eight bytes long is unexplained and is
-/// deliberately not reproduced; see the change's `design.md`.
+/// The rule depends on the password's length, and the three cases are genuinely
+/// different rules rather than one rule with a special case (`docs/cbv-reference.md` §9):
+///
+/// | password length | key |
+/// |---|---|
+/// | exactly 8 bytes | those eight bytes, unchanged |
+/// | fewer than 8 | the password **repeated** until it is at least 8 long, then the first 8 — so `pass` gives `passpass`, **not** `pass\0\0\0\0` |
+/// | more than 8 | **folded**: eight accumulators start at zero and, for each byte *i*, accumulator `i mod 8` is doubled and then exclusive-ORed with that byte |
+///
+/// Zero-padding a short password and truncating a long one were both wrong, and
+/// both were wrong *silently*: they produce a valid DES key, so a wrong key
+/// yields plausible-looking noise rather than an error. The tests in this module
+/// are what caught it, against the reference's own three samples.
+///
+/// The fold is **not** order-independent across the length: two ten-byte
+/// passwords sharing an eight-byte prefix produce different keys, because the
+/// doubling makes each accumulator depend on how many bytes have been folded
+/// into it.
 pub fn key_from_password(password: &str) -> Key {
-    let mut bytes = [0u8; 8];
-    for (slot, b) in bytes.iter_mut().zip(password.as_bytes()) {
-        *slot = *b;
+    let bytes = password.as_bytes();
+    let mut key = [0u8; 8];
+    // An empty password has no bytes to repeat, so the repeat rule does not
+    // apply and the key stays all zero. It is a wrong password like any other —
+    // `verify_password` reports it as one — but it must not divide by zero.
+    if bytes.is_empty() {
+        return Key::new(key);
     }
-    Key::new(bytes)
+    match bytes.len().cmp(&8) {
+        // Exactly eight bytes: the key is the password.
+        std::cmp::Ordering::Equal => key.copy_from_slice(bytes),
+        // Shorter: repeat until eight bytes are covered. A four-byte password
+        // repeats, which is the case zero-padding gets wrong.
+        std::cmp::Ordering::Less => {
+            for (i, slot) in key.iter_mut().enumerate() {
+                *slot = bytes[i % bytes.len()];
+            }
+        }
+        // Longer: fold. Accumulator `i mod 8` takes this byte, doubled first so a
+        // ninth byte cannot simply overwrite the first.
+        std::cmp::Ordering::Greater => {
+            for (i, &b) in bytes.iter().enumerate() {
+                let acc = &mut key[i % 8];
+                *acc = acc.wrapping_shl(1) ^ b;
+            }
+        }
+    }
+    Key::new(key)
 }
 
 /// A container header as it stands once deciphered, with the member count
@@ -337,18 +375,19 @@ pub fn sample() -> Option<PathBuf> {
     path.is_file().then_some(path)
 }
 
-/// Opens the `.cbz` at `path` with `password`.
+/// Opens the `.cbz` at `path` with `password`, deciphering the whole file.
+///
+/// This reads the entire archive into memory, so it is a convenience for a
+/// small file and a test. Extracting a large protected archive goes through
+/// [`crate::archive::Archive::open_with_password`], which deciphers only the
+/// ranges it reads.
 ///
 /// # Errors
 ///
-/// Always, at the moment. A `.cbz` cannot be opened, because the key
-/// derivation, the chaining mode and the password check are all unestablished
-/// (see the module documentation). The crate's own
-/// [`Error::WrongPassword`] is what this should report once a sample makes the
-/// check observable; until then a [`Error::Corrupt`] naming the three open
-/// points is returned, which is typed, never a silent success and never a
-/// panic. Guessing a derivation here would produce a reader that hands back
-/// confident garbage.
+/// [`Error::WrongPassword`] when the deciphered head is not shaped like a
+/// container header, and the crate's I/O error when the file cannot be read. A
+/// wrong password is always this error and never corruption, because the two are
+/// indistinguishable from the bytes alone.
 pub fn open(path: &Path, password: &str) -> Result<Vec<u8>, Error> {
     let file = DbFile::open(path.to_path_buf())?;
     let len = file.len()?;
@@ -420,17 +459,128 @@ mod tests {
         assert_eq!(Key::new([0; 8]).bytes(), [0; 8]);
     }
 
-    /// The established key rule, stated as a test so a future change to it has
-    /// to argue with this rather than drift.
+    /// The three key rules, each pinned to the value the format requires.
+    ///
+    /// These are the cases a single "take the first eight bytes" rule gets
+    /// wrong, and they are why this test exists: the reference's own samples use
+    /// one password per rule, so a reader implementing only the eight-byte case
+    /// opens one of three real `.cbz` files and silently fails on the other two.
     #[test]
-    fn a_key_is_the_passwords_first_eight_bytes() {
+    fn the_key_rule_depends_on_the_passwords_length() {
+        // Exactly eight bytes: the key *is* the password.
         assert_eq!(key_from_password("password").bytes(), *b"password");
-        assert_eq!(key_from_password("passwordXX").bytes(), *b"password");
-        // a short password is zero-padded rather than refused
-        assert_eq!(key_from_password("short").bytes(), *b"short\0\0\0");
-        assert_eq!(key_from_password("").bytes(), [0u8; 8]);
-        // a multi-byte character is taken by its encoded bytes
-        assert_eq!(key_from_password("\u{e9}").bytes(), [0xC3, 0xA9, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(key_from_password("12345678").bytes(), *b"12345678");
+
+        // Fewer than eight: **repeated**, not zero-padded. `passpass`, and the
+        // four trailing zeros are the thing this asserts against.
+        assert_eq!(key_from_password("pass").bytes(), *b"passpass");
+        assert_eq!(key_from_password("a").bytes(), *b"aaaaaaaa");
+        assert_ne!(key_from_password("pass").bytes(), *b"pass\0\0\0\0", "zero-padding is the obvious wrong answer");
+
+        // More than eight: **folded**. The measured key for the reference's own
+        // sixteen-byte sample is AA 93 33 AB A9 B3 BC 24.
+        assert_eq!(key_from_password("my long password").bytes(), [0xAA, 0x93, 0x33, 0xAB, 0xA9, 0xB3, 0xBC, 0x24]);
+        // Nine bytes: the ninth reaches accumulator 0 and is doubled *before*
+        // being xored in, so it does not simply overwrite the first byte. The
+        // accumulator already holds `'p'` (0x70), so it becomes `(0x70 << 1) ^ 0x58`.
+        assert_eq!(
+            key_from_password("passwordX").bytes(),
+            [(b'p' << 1) ^ b'X', b'a', b's', b's', b'w', b'o', b'r', b'd']
+        );
+        assert_ne!(key_from_password("passwordX").bytes()[0], b'p', "the first byte moved");
+
+        // An empty password is a wrong password, not a division by zero.
+        assert_eq!(key_from_password("").bytes(), [0; 8]);
+    }
+
+    /// The fold depends on how many bytes reached each accumulator, so two
+    /// passwords sharing an eight-byte prefix do not share a key.
+    ///
+    /// This is the property that rules out "the key is just the first eight
+    /// bytes" and "the extra bytes are appended" as explanations.
+    #[test]
+    fn the_fold_is_not_order_independent_across_the_length() {
+        let a = key_from_password("passwordX").bytes();
+        let b = key_from_password("passwordY").bytes();
+        assert_ne!(a, b, "the ninth byte reaches accumulator 0");
+        assert_eq!(a[1..], b[1..], "and leaves the other seven alone");
+        assert_ne!(key_from_password("passwordXY").bytes(), key_from_password("password").bytes());
+    }
+
+    /// A multi-byte character is taken by its UTF-8 bytes, like any other byte.
+    ///
+    /// This is worth pinning because the rule branches on the password's
+    /// **byte** length, not its character count: `é` is two bytes, so it repeats
+    /// rather than zero-padding even though it is one character.
+    #[test]
+    fn a_password_is_keyed_by_its_encoded_bytes_not_its_characters() {
+        // Two bytes, so the repeat rule applies: `C3 A9 C3 A9 ...`.
+        assert_eq!(key_from_password("\u{e9}").bytes(), [0xC3, 0xA9, 0xC3, 0xA9, 0xC3, 0xA9, 0xC3, 0xA9]);
+    }
+
+    /// Every key rule deciphers the reference's samples, and no other password does.
+    ///
+    /// The samples are the reference's own, one per key rule; a `.cbz` is
+    /// deciphered, opened and read here exactly as a `.cbv` would be. Without
+    /// this, a wrong key rule would only ever be caught by a human noticing that
+    /// a protected archive refused to open — which is precisely how the
+    /// zero-padding rule survived here for so long.
+    #[test]
+    fn all_three_reference_samples_decipher_and_a_wrong_password_does_not() {
+        let Some(samples) = reference_samples() else {
+            eprintln!("the reference's .cbz samples are not vendored: skipping");
+            return;
+        };
+        assert_eq!(samples.len(), 3, "all three key rules are covered");
+        for (name, password, members) in samples {
+            let path = sample_path(name);
+            assert!(verify_password(&path, password).unwrap(), "{name} opens with '{password}'");
+            let plain = open(&path, password).expect("the right password deciphers it");
+            assert_eq!(plain.len(), 3000, "{name}: the whole file is deciphered");
+            assert!(looks_like_a_container(&plain), "{name}: the deciphered file is a container");
+
+            // The container it deciphers to really is a readable archive, holding
+            // the member count its own header states.
+            let dir = std::env::temp_dir().join("cbvault-cbz-tests");
+            std::fs::create_dir_all(&dir).unwrap();
+            let as_cbv = dir.join(name.replace(".cbz", ".cbv"));
+            std::fs::write(&as_cbv, &plain).unwrap();
+            let archive = crate::archive::Archive::open(&as_cbv).expect("the deciphered container opens");
+            assert_eq!(archive.list().len(), members, "{name}: the member count the header states");
+            std::fs::remove_file(&as_cbv).ok();
+
+            // Every other password is a wrong password: a typed error, never
+            // corruption and never a panic.
+            for wrong in ["", "wrongpwd", "passwordx", "passwor", "MY LONG PASSWORD"] {
+                assert!(!verify_password(&path, wrong).unwrap(), "{name}: '{wrong}' must not verify");
+                assert!(matches!(open(&path, wrong), Err(Error::WrongPassword { .. })), "{name}: '{wrong}'");
+            }
+        }
+    }
+
+    /// The samples the reference ships, as `(name, password, member count)`.
+    ///
+    /// `None` when the oracle is not vendored, so the suite stays green in public
+    /// CI. The passwords are established facts, not read out of the reference's
+    /// source: each is the only one of the three that deciphers its file's header
+    /// into a container shape.
+    fn reference_samples() -> Option<Vec<(&'static str, &'static str, usize)>> {
+        let dir = sample_path("");
+        if !dir.is_dir() {
+            return None;
+        }
+        Some(
+            [("small.cbz", "password", 12usize), ("small2.cbz", "pass", 12), ("small3.cbz", "my long password", 12)]
+                .into_iter()
+                .filter(|(name, ..)| dir.join(name).is_file())
+                .collect(),
+        )
+    }
+
+    /// One sample's path, or the samples' own directory when `name` is empty.
+    fn sample_path(name: &str) -> PathBuf {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../vendor/oracles/uncbv/tests");
+        if name.is_empty() { dir } else { dir.join(name) }
     }
 
     /// ECB: a block deciphers on its own, and a range at an arbitrary offset

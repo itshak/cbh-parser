@@ -6,33 +6,48 @@
 //! Damage is applied by truncating and by flipping bytes, and every case asserts
 //! a typed error or a clean open — never a panic.
 
+use super::blocks::*;
 use super::*;
 use crate::archive::entry::tests::record;
 
-/// A member of a synthetic archive: its name, its content and the mode its
-/// stream is stored in.
+/// A member of a synthetic archive: its name, its content, and the blocks its
+/// stream carries.
 struct Fixture {
     name: &'static str,
     content: Vec<u8>,
-    mode: u8,
+    blocks: Vec<Vec<u8>>,
 }
 
 impl Fixture {
-    /// A member whose stream is stored verbatim behind the five-byte head.
+    /// A member whose stream is one stored block.
     fn stored(name: &'static str, content: &[u8]) -> Fixture {
-        Fixture { name, content: content.to_vec(), mode: Mode::STORED }
+        Fixture { name, content: content.to_vec(), blocks: vec![block(Mode::STORED, content)] }
     }
 
-    /// A member whose stream is in a mode this build does not decode.
-    fn compressed(name: &'static str, content: &[u8], mode: u8) -> Fixture {
-        Fixture { name, content: content.to_vec(), mode }
+    /// A member whose stream is one LZ block, coded as literals.
+    fn lz(name: &'static str, content: &[u8]) -> Fixture {
+        Fixture { name, content: content.to_vec(), blocks: vec![block(Mode::LZ, &lz_literals(content))] }
     }
 
-    /// The stream as it would sit in the pool.
+    /// A member whose stream is one Huffman block.
+    fn huffman(name: &'static str, content: &[u8]) -> Fixture {
+        Fixture { name, content: content.to_vec(), blocks: vec![block(Mode::HUFFMAN, &huffman_block(content))] }
+    }
+
+    /// A member whose stream is one Huffman-then-LZ block.
+    fn huffman_lz(name: &'static str, content: &[u8]) -> Fixture {
+        let body = huffman_block(&lz_literals(content));
+        Fixture { name, content: content.to_vec(), blocks: vec![block(Mode::HUFFMAN_LZ, &body)] }
+    }
+
+    /// A member whose stream carries the given blocks, in order.
+    fn multi(name: &'static str, content: &[u8], blocks: Vec<Vec<u8>>) -> Fixture {
+        Fixture { name, content: content.to_vec(), blocks }
+    }
+
+    /// The stream as it would sit in the pool: its blocks, back to back.
     fn stream(&self) -> Vec<u8> {
-        let mut s = vec![0xA5, 0x5A, 0x33, 0xCC, self.mode];
-        s.extend_from_slice(&self.content);
-        s
+        self.blocks.concat()
     }
 }
 
@@ -67,31 +82,30 @@ fn build(fixtures: &[Fixture]) -> Vec<u8> {
     out
 }
 
-/// Writes `bytes` to a fresh file under a per-test directory and returns it.
-fn temp(name: &str, bytes: &[u8]) -> PathBuf {
-    let dir = scratch(name);
-    let path = dir.join("test.cbv");
-    std::fs::write(&path, bytes).unwrap();
-    path
-}
-
-/// A scratch directory for one test, emptied first.
-fn scratch(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("cbvault-archive-{}-{name}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
-    dir
-}
-
-/// The five fixtures every test here starts from: two database files, an asset
-/// folder of two members, and one member in an unresolved mode.
+/// The fixtures every test here starts from: two database files, an asset
+/// folder of two members, and one member for each of the other modes.
+///
+/// The last member mixes modes across its blocks, which is the case a reader
+/// that decides the mode once per member gets wrong — 130 members of the
+/// reference archive are like it.
 fn sample() -> Vec<Fixture> {
     vec![
         Fixture::stored("db.cbh", b"header records"),
-        Fixture::stored("db.cbg", b"move records"),
+        Fixture::lz("db.cbg", b"move records"),
         Fixture::stored("db.bmp\\0.bmp", b"first bitmap"),
         Fixture::stored("db.bmp\\1.bmp", b"second bitmap"),
-        Fixture::compressed("db.cba", b"annotations", Mode::LZ),
+        Fixture::huffman("db.cba", b"annotation records"),
+        Fixture::huffman_lz("db.cbp", b"name base records"),
+        Fixture::multi(
+            "db.cbt",
+            b"mixed modes in one stream",
+            vec![
+                block(Mode::STORED, b"mixed "),
+                block(Mode::LZ, &lz_literals(b"modes ")),
+                block(Mode::HUFFMAN, &huffman_block(b"in one ")),
+                block(Mode::HUFFMAN_LZ, &huffman_block(&lz_literals(b"stream"))),
+            ],
+        ),
     ]
 }
 
@@ -100,8 +114,8 @@ fn a_synthetic_archive_lists_its_members() {
     let path = temp("list", &build(&sample()));
     let a = Archive::open(&path).unwrap();
     let names: Vec<&str> = a.list().iter().map(|m| m.name()).collect();
-    assert_eq!(names, ["db.cbh", "db.cbg", "db.bmp\\0.bmp", "db.bmp\\1.bmp", "db.cba"]);
-    assert_eq!(a.list().len(), 5);
+    assert_eq!(names, ["db.cbh", "db.cbg", "db.bmp\\0.bmp", "db.bmp\\1.bmp", "db.cba", "db.cbp", "db.cbt"]);
+    assert_eq!(a.list().len(), 7);
     assert_eq!(a.find("db.cbg").unwrap().size(), 12);
     assert!(a.find("nope").is_none());
     assert_eq!(a.member(99), None);
@@ -114,7 +128,7 @@ fn the_table_and_the_pool_tile_the_file() {
     let a = Archive::open(&path).unwrap();
     let l = a.layout();
     assert_eq!(l.table_offset, DIRECTORY_OFFSET);
-    assert_eq!(l.pool_offset, DIRECTORY_OFFSET + 5 * ENTRY_SIZE);
+    assert_eq!(l.pool_offset, DIRECTORY_OFFSET + 7 * ENTRY_SIZE);
     assert_eq!(l.pool_end, a.size());
     assert_eq!(a.size() as usize, bytes.len(), "the reader measured the file that was built");
     assert!(l.tiles, "{l:?}");
@@ -139,7 +153,7 @@ fn members_of_one_group_are_contiguous() {
     assert!(a.contiguity().is_empty(), "{:?}", a.contiguity());
     assert_eq!(a.groups(), ["", "db.bmp"]);
     assert_eq!(a.group("db.bmp").count(), 2);
-    assert_eq!(a.group("").count(), 3, "the three database files share the root group");
+    assert_eq!(a.group("").count(), 5, "the five root database files share one group");
     assert_eq!(a.find("db.bmp\\1.bmp").unwrap().folder(), Some("db.bmp"));
     assert_eq!(a.find("db.cbh").unwrap().folder(), None);
     assert!(a.find("db.bmp\\1.bmp").unwrap().is_asset());
@@ -161,7 +175,7 @@ fn a_gap_between_groups_is_reported_not_rejected() {
     let moved = bytes.split_off(at_hole);
     bytes.extend(std::iter::repeat_n(0u8, shift as usize));
     bytes.extend(moved);
-    for i in 1..5usize {
+    for i in 1..sample().len() {
         let at = DIRECTORY_OFFSET as usize + i * ENTRY_SIZE as usize;
         let mut trio = [0u8; 4];
         trio.copy_from_slice(&bytes[at + entry::TRIO_OFFSET..at + entry::TRIO_OFFSET + 4]);
@@ -204,9 +218,12 @@ fn a_stored_member_decodes_to_its_content() {
 }
 
 #[test]
-fn a_stored_stream_whose_body_is_the_wrong_length_is_rejected() {
+fn a_stored_stream_whose_length_contradicts_the_table_is_reported() {
+    // A member whose stream holds five bytes while its record claims six: the
+    // table and the pool disagree, which the reader must report rather than
+    // resolve by padding or truncating.
     let mut fixtures = sample();
-    fixtures[0].content = b"short".to_vec();
+    fixtures[0] = Fixture::stored("db.cbh", b"short");
     let mut bytes = build(&fixtures);
     // claim one more byte of content than the stream holds
     let at = DIRECTORY_OFFSET as usize + entry::TRIO_OFFSET + 8;
@@ -219,53 +236,68 @@ fn a_stored_stream_whose_body_is_the_wrong_length_is_rejected() {
     let path = temp("badlen", &bytes);
     let a = Archive::open(&path).unwrap();
     let m = a.find("db.cbh").unwrap();
+    // The stream itself decodes; the table and the stream disagree, and the
+    // reader says so rather than padding or truncating to hide it.
+    let mut out = Vec::new();
+    let mut scratch = Scratch::new();
+    let report = a.decode_into(m, &mut out, &mut scratch).expect("the stream is a valid stored block");
+    assert_eq!(out, b"short", "the block's own bytes");
+    assert_eq!(report.produced, 5, "the block produced five bytes");
+    assert_eq!(m.size(), 6, "the record claims six");
+    assert_eq!(report.size_mismatch, Some((6, 5)), "declared against produced, both reported");
+    assert!(!report.exact(), "the reader does not call a mismatch exact");
+}
+
+#[test]
+fn every_mode_decodes_to_its_content() {
+    let path = temp("modes", &build(&sample()));
+    let a = Archive::open(&path).unwrap();
+    for f in sample() {
+        let m = a.find(f.name).expect("the fixture is named");
+        assert_eq!(a.decode(m).unwrap(), f.content, "{}", f.name);
+    }
+}
+
+#[test]
+fn a_mode_is_read_per_block_not_per_member() {
+    // The member whose blocks carry all four modes. A reader that decided the
+    // mode once, from the first block, would get only `mixed ` out of it.
+    let path = temp("permode", &build(&sample()));
+    let a = Archive::open(&path).unwrap();
+    let m = a.find("db.cbt").expect("the mixed member is named");
+    let mut out = Vec::new();
+    let mut scratch = Scratch::new();
+    let report = a.decode_into(m, &mut out, &mut scratch).unwrap();
+    assert_eq!(out, b"mixed modes in one stream");
+    assert_eq!(report.blocks, 4);
+    assert_eq!(report.mode_counts, [1, 1, 1, 1], "one block of each mode");
+    assert!(report.exact());
+}
+
+#[test]
+fn a_block_naming_an_unknown_mode_is_refused() {
+    let fixtures = vec![Fixture::multi("odd.cbh", b"", vec![block(0x09, b"payload")])];
+    let path = temp("badmode", &build(&fixtures));
+    let a = Archive::open(&path).unwrap();
+    let m = a.find("odd.cbh").unwrap();
+    assert!(!a.can_decode(m).unwrap(), "a mode this build does not decode");
     let e = a.decode(m).unwrap_err();
-    assert!(e.to_string().contains("stored stream"), "{e}");
+    assert!(e.to_string().contains("not one of the four transforms"), "{e}");
 }
 
 #[test]
-fn a_member_in_an_unresolved_mode_reports_the_codec_as_unavailable() {
-    let path = temp("unavail", &build(&sample()));
-    let a = Archive::open(&path).unwrap();
-    let m = a.find("db.cba").unwrap();
-    assert!(!a.can_decode(m).unwrap());
-    match a.decode(m) {
-        Err(Error::CodecUnavailable { member, mode, .. }) => {
-            assert_eq!((member.as_str(), mode), ("db.cba", Mode::LZ))
-        }
-        other => panic!("expected CodecUnavailable, got {other:?}"),
-    }
-}
-
-#[test]
-fn mode_one_is_still_not_decoded() {
-    let fixtures = vec![Fixture::compressed("only.cba", b"annotations", Mode::MODE_1)];
-    let path = temp("mode1", &build(&fixtures));
-    let a = Archive::open(&path).unwrap();
-    let m = a.find("only.cba").unwrap();
-    assert!(!a.can_decode(m).unwrap());
-    match a.decode(m) {
-        Err(Error::CodecUnavailable { member, mode, .. }) => {
-            assert_eq!((member.as_str(), mode), ("only.cba", Mode::MODE_1))
-        }
-        other => panic!("expected CodecUnavailable, got {other:?}"),
-    }
-}
-
-#[test]
-fn extraction_writes_stored_members_and_folders_then_stops() {
+fn extraction_writes_every_member_and_its_folders() {
     let path = temp("extract", &build(&sample()));
     let a = Archive::open(&path).unwrap();
     let dir = scratch("out-extract");
-    match a.extract(&dir).unwrap_err() {
-        Error::CodecUnavailable { member, .. } => assert_eq!(member, "db.cba"),
-        other => panic!("expected CodecUnavailable, got {other:?}"),
-    }
+    let written = a.extract(&dir).expect("every member decodes");
+    assert_eq!(written.len(), sample().len());
     assert_eq!(std::fs::read(dir.join("db.cbh")).unwrap(), b"header records");
     assert_eq!(std::fs::read(dir.join("db.cbg")).unwrap(), b"move records");
     assert_eq!(std::fs::read(dir.join("db.bmp").join("0.bmp")).unwrap(), b"first bitmap");
     assert_eq!(std::fs::read(dir.join("db.bmp").join("1.bmp")).unwrap(), b"second bitmap");
-    assert!(!dir.join("db.cba").exists(), "the member that could not be decoded is not written");
+    assert_eq!(std::fs::read(dir.join("db.cba")).unwrap(), b"annotation records");
+    assert_eq!(std::fs::read(dir.join("db.cbt")).unwrap(), b"mixed modes in one stream");
 }
 
 #[test]
@@ -349,7 +381,7 @@ fn truncating_at_every_length_never_panics() {
 fn corrupting_any_byte_of_the_magic_or_the_table_never_panics() {
     let bytes = build(&sample());
     let dir = scratch("corrupt");
-    let head_and_table = DIRECTORY_OFFSET as usize + 5 * ENTRY_SIZE as usize;
+    let head_and_table = DIRECTORY_OFFSET as usize + 7 * ENTRY_SIZE as usize;
     for at in 0..head_and_table {
         for xor in [0x01u8, 0x80, 0xFF] {
             let mut damaged = bytes.clone();
@@ -366,7 +398,7 @@ fn damage_to_the_table_yields_only_typed_errors_or_clean_opens() {
     let bytes = build(&sample());
     let dir = scratch("typed");
     let (mut typed, mut opened) = (0, 0);
-    for at in 0..DIRECTORY_OFFSET as usize + 5 * ENTRY_SIZE as usize {
+    for at in 0..DIRECTORY_OFFSET as usize + 7 * ENTRY_SIZE as usize {
         let mut damaged = bytes.clone();
         damaged[at] ^= 0xFF;
         let path = dir.join(format!("t{at}.cbv"));
@@ -398,13 +430,13 @@ fn a_table_that_overlaps_the_pool_is_rejected() {
 fn a_table_off_the_record_grid_is_rejected() {
     let mut bytes = build(&sample());
     // move the pool one byte forward and tell the first record about it, so the
-    // table is 866 bytes: five whole records and one byte over
-    let pool_start = DIRECTORY_OFFSET as usize + 5 * ENTRY_SIZE as usize;
+    // table is 1212 bytes: seven whole records and one byte over
+    let pool_start = DIRECTORY_OFFSET as usize + 7 * ENTRY_SIZE as usize;
     let mut moved = bytes.split_off(pool_start);
     bytes.push(0);
     bytes.append(&mut moved);
     let moved_by = (pool_start + 1) as u32;
-    for i in 0..5usize {
+    for i in 0..7usize {
         let at = DIRECTORY_OFFSET as usize + i * ENTRY_SIZE as usize;
         let mut trio = [0u8; 4];
         trio.copy_from_slice(&bytes[at + entry::TRIO_OFFSET..at + entry::TRIO_OFFSET + 4]);

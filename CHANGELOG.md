@@ -13,8 +13,8 @@ below is the in-tree workspace version, not a release.
 ## [0.1.0] - unreleased
 
 The first public shape of the library. It is a **work in progress**: the classic
-`.cbh` family is read and exported, the `.cbv` container is parsed, and 2CBH
-yields tags but no moves. `README.md` § "What is not supported yet" is the
+`.cbh` family is read and exported, `.cbv`/`.cbz` archives unarchive in full, and
+2CBH yields tags but no moves. `README.md` § "What is not supported yet" is the
 authoritative list of what is missing.
 
 ### Added
@@ -50,19 +50,31 @@ authoritative list of what is missing.
   `export_parallel`, `export_range`, `export_range_from` and `export_span`.
   **407,350 of 419,385 games match a ChessBase export byte for byte (97.1 %)**;
   §10 of `docs/format-spec.md` lists the five deliberate deviations.
-- **`.cbv` archive container.** Magic, the 173-byte member table, the
-  self-describing member count derived from the geometry, per-record validation
-  against the table's own redundant 32/64-bit copies, the five-byte stream head
-  and the compression mode byte. Listing touches no part of the data pool.
-- **Stored-mode extraction.** Mode `0x00` decodes and is verified on 2,228 of the
-  reference archive's 3,871 members (57.6 %). The other three modes report
-  `Error::CodecUnavailable` and are never written to disk.
+- **`.cbv` archive container and codec, complete.** Magic, the 173-byte member
+  table, the self-describing member count derived from the geometry, per-record
+  validation against the table's own redundant 32/64-bit copies, and the block
+  framing. **All four block modes are decoded** — stored, LZ, Huffman, and
+  Huffman-then-LZ — so extraction yields **3,871 of 3,871 members and 100 % of
+  the reference archive's 3.61 GB**, including the 512 MB `.cbh` and the 1.25 GB
+  `.cbj`. Listing touches no part of the data pool. Extracting the archive takes
+  **7.1 s on ten threads (504 MB/s decoded), against 66.4–70.3 s for `uncbv`** on
+  the same machine.
+- **Parity with `uncbv` measured, not asserted.** Every member of every corpus —
+  `twic1134.cbv`, the 3,871-member reference archive and the three `.cbz` samples
+  — is **byte-identical to the reference process's own output**, in both
+  directions (including files the reference wrote that the table does not name).
+  Reached under a documented two-room clean room; see
+  `docs/research/03-clean-room-audit.md`.
+- **`.cbz`, fully.** DES in ECB with **three** key rules depending on the
+  password's length — as-is at eight bytes, **repeat** below, **fold** above —
+  each verified against the reference's own sample for that rule. The password
+  check is one eight-byte read, so opening a protected archive never deciphers it.
 - **A 2CBH reader** (`cbvault_format::twocbh`): fixed 192-byte records, headers,
   annotations, and record framing verified over 220,418 records with zero
   violations. `GameMoves::is_decoded()` is `false` by design — the move codec is
   not decoded, so no `moves2` is fabricated from it.
 - **DES (FIPS 46-3)** implemented and checked against the standard's published
-  test vectors, so the primitive is provable without a `.cbz` sample.
+  test vectors.
 - **The test-only fixture builder** (`cbvault-fixtures`, `publish = false`), so
   the format round-trips are exercised in CI with no real database.
 
@@ -91,6 +103,13 @@ authoritative list of what is missing.
 
 ### Fixed
 
+- **The `.cbv` key derivation for a password that is not eight bytes was wrong**,
+  and wrong silently: a short password was zero-padded and a long one truncated,
+  where the format repeats and folds. Two of the reference's three `.cbz` samples
+  were unopenable as a result. A wrong DES key is still a valid key, so it
+  deciphers to noise rather than failing — the existing test had asserted the
+  wrong behaviour. Fixed, and all three rules are now pinned by tests against the
+  reference's own samples.
 - **A stale-cache bug in the fast make**, where a pass turn was validated against
   a `checkers` value `play_fast` had left behind. Fixed in `gigachess` and
   adopted here.
@@ -106,12 +125,6 @@ authoritative list of what is missing.
 These are real and are not fixed; each is described in `README.md` § "What is not
 supported yet".
 
-- **The `.cbv` compression codec is unsolved.** Only mode `0x00` (2,228 of 3,871
-  members) decodes; modes 1 (68), 2 (58) and 3 (1,517) do not. Around 6,000
-  candidate LZ grammars were swept and none reproduces the smallest exact pair.
-- **`.cbz` is not implemented.** No sample has ever existed on the development
-  machine, so the DES key derivation, the chaining mode and the password check are
-  unverified and deliberately unimplemented rather than guessed.
 - **The 2CBH `.2cbg` move codec is not decoded**, and a specific list of 2CBH
   header fields remains unknown. A 2CBH database yields tags and annotations but
   no `moves2`.
@@ -122,7 +135,7 @@ supported yet".
 - **`Filter` has no "starts from a set-up position" predicate**; the bit is in the
   move record and a tag search does not open the moves file.
 - **No fuzzing has been done, no crate is published to crates.io**, and the
-  `.cbv` container layout is verified on a single archive.
+  `.cbv` container layout is verified on two containers and one 1.74 GB archive.
 
 ### Notes
 

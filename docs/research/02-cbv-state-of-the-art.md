@@ -1,10 +1,22 @@
 # `.cbv` unarchiving — state of the art, and what the codec probably is
 
 > **Status: research report, 2026-09-30.** Not a specification — the normative
-> format facts live in [`format-spec-cbv.md`](format-spec-cbv.md) and the
-> evidence ledger in [`research/00-cbv-facts.md`](research/00-cbv-facts.md). This
-> document answers three questions: what already exists, how far `cbvault`
-> actually gets, and which compression family the unsolved mode belongs to.
+> format facts live in [`../cbv-reference.md`](../cbv-reference.md) and
+> [`../format-spec-cbv.md`](../format-spec-cbv.md), and the evidence ledger in
+> [`00-cbv-facts.md`](00-cbv-facts.md). This document answers three questions:
+> what already exists, how far `cbvault` actually gets, and which compression
+> family the unsolved mode belongs to.
+>
+> ---
+>
+> **Superseded in its conclusions; kept as the record.** Everything below that
+> says `cbvault` "cannot decode" a mode, or that mode `0x03` is "the blocker",
+> is **out of date**. `cbvault` now decodes **all four modes**, reaches **3,871 of
+> 3,871** members byte-identical to the reference process, and is ≈9.4× faster
+> than it. The predictions this survey made were right — the codec is an LZ77
+> family under an explicit-path Huffman layer, exactly as §6 argues — which is
+> why the reasoning is kept rather than replaced. Where a section has been
+> corrected, it says so. The clean-room process that closed the gap is in §9.
 
 ---
 
@@ -21,8 +33,8 @@ must be a clean-room reimplementation. `cbvault` is doing exactly that, and
 `uncbv` stays a separate-process oracle — which is what
 `docs/research/00-cbv-facts.md` and `scripts/oracles/` already assumed.
 
-**`uncbv` is not a partial implementation.** It is a complete unarchiver, and it
-extracts the mode that `cbvault` cannot. Verified here, first-hand, today:
+**`uncbv` is not a partial implementation.** It is a complete unarchiver. Verified
+here, first-hand, on the day this survey was written:
 
 ```
 $ ./vendor/oracles/uncbv/target/release/uncbv extract \
@@ -35,9 +47,14 @@ $ # all 13 extracted members byte-identical to the checked-in ground truth: 13/1
 ```
 
 Those include `.cbh` (281,428 B), `.cbj` (734,072 B) and `.cbe` (9,608 B), all
-of which are **mode `0x03`** — the mode `cbvault` cannot decode. So the gap
-between `cbvault` and the state of the art is not "nobody has done it"; it is
-"one GPL project has, and we cannot use its code."
+of which are **mode `0x03`** — the mode `cbvault` could not decode at the time.
+So the gap between `cbvault` and the state of the art was never "nobody has done
+it"; it was "one GPL project has, and we cannot use its code."
+
+> **Closed.** `cbvault` decodes mode `0x03` too and reaches the same bytes:
+> **13/13** on this sample, **3,871/3,871** on the reference archive. See §3 and
+> §9. What remains between the two projects is now a performance question, and it
+> is the one `cbvault` wins.
 
 ### Independent corroboration from the oracle's own public metadata
 
@@ -70,6 +87,7 @@ byte-level analysis:
 | project | language | licence | extracts `.cbv`? | `.cbz`? | how it works |
 |---|---|---|---|---|---|
 | **[antoyo/uncbv](https://github.com/antoyo/uncbv)** | Rust | **GPL-3.0** | **YES — complete** | yes, interactive password only | implements the container and the codec itself |
+| **cbvault** (this project) | Rust | **MIT** | **YES — complete, and at parity** | yes, `--password` non-interactive | clean-room from a specification of facts; never read the reference's source |
 | asdfjkl/cbh2pgn | C++ | MIT | no — reads unpacked `.cbh` | no | n/a |
 | harshitpawar64/cbh2pgn | C | MIT | no | no | n/a |
 | scidb `cbh2si4` | C++ | GPL | no | no | n/a |
@@ -109,25 +127,67 @@ Worth recording, because they are what a clean-room reimplementation buys:
 
 ## 3. What `cbvault` actually does today
 
-Measured on `Mega Database 2025.cbv` (1,739,254,607 packed bytes, 3,871 members).
+> **Corrected.** This section originally read "2,286 of 3,871 members (59.0 %),
+> **3.6 %** of the bytes, none of the twelve database files". That was true on the
+> day it was written and is now **false**: `cbvault` extracts **3,871 of 3,871**
+> members and **100 %** of the bytes, byte-identically. The original figures are
+> kept in the table below, because the *shape* of the gap — small members decoded,
+> every database file missing — is what pointed at mode `0x03`.
 
-| | members | packed bytes |
+Measured on `Mega Database 2025.cbv` (1,739,254,607 packed bytes, 3,871 members):
+
+| | members | packed bytes | decoded bytes |
+|---|---|---|---|
+| **extractable, then** | 2,286 of 3,871 (59.0 %) | 63,374,719 (**3.6 %**) | — |
+| **the 12 database files, then** | **0 of 12** | 1,601,662,129 (**92.1 %**) | — |
+| **extractable, now** | **3,871 of 3,871 (100 %)** | **1,739,254,607 (100 %)** | **3,607,876,417 (100 %)** |
+| **the 12 database files, now** | **12 of 12** | — | — |
+
+The member count was a misleading metric and the byte count the honest one. The
+members that used to decode were the *small* ones — 2,205 of them were `.jpg` —
+and **asking `cbvault` for the `.cbh` used to yield zero bytes and a typed
+error.** It now yields all 512,951,520 bytes, identical to the reference
+process's.
+
+**Parity, which is the acceptance test rather than a claim:**
+
+| corpus | members | result |
 |---|---|---|
-| **extractable** | 2,286 of 3,871 (59.0 %) | 63,374,719 (**3.6 %**) |
-| **the 12 database files** | **0 of 12** | 1,601,662,129 (**92.1 %**) |
+| `twic1134.cbv` | 13 | **13/13** byte-identical to the reference process |
+| `Mega Database 2025.cbv` | 3,871 | **3,871/3,871**; 100 % of 3,607,876,417 bytes |
+| the three `.cbz` samples | 12 each | **12/12** each, one per key rule |
 
-The member count is a misleading metric and the byte count is the honest one.
-The members that decode are the *small* ones — 2,205 of them are `.jpg`.
-**Asking `cbvault` for the `.cbh` yields zero bytes and a typed error.**
+### Performance, head to head
+
+Full extraction of the 1.74 GB archive to disk, on a 10-core machine:
+
+| | time | throughput |
+|---|---|---|
+| `uncbv` | 66.4 / 66.8 / 70.3 s | 51–54 MB/s |
+| **cbvault, 10 threads** | **7.1 s** | **504 MB/s** |
+| cbvault, 1 thread | 15.99 s | 226 MB/s |
+
+Decode-only, which measures the codec instead of the disk: 13.87 s single
+threaded (260 MB/s), 6.43 s at 10 workers (561 MB/s). So **≈9.4× faster than the
+reference process** end to end.
+
+Two caveats, because a comparison is only as good as its conditions. These are
+**our** measurements on **our** machine, run back to back — not a benchmark either
+project has published. And **ChessBase publishes no speed claim for unarchiving
+`.cbv`** — its only published figure is a space claim ("about 30 % to 50 %"), so
+there is no vendor number to be faster or slower than.
 
 ### By compression mode
 
-| mode | members | what it is | status in `cbvault` |
-|---|---|---|---|
-| `0x00` | 2,228 | stored verbatim | **decoded, verified** |
-| `0x01` | 68 | unidentified | not decoded |
-| `0x02` | 58 | Huffman over bytes | **decoded, verified** (38/58 byte-exact) |
-| `0x03` | 1,517 | Huffman over *tokens*; **holds every database file** | not decoded |
+All four are decoded and verified. The mode is per **block**, and 130 members mix
+modes across their blocks.
+
+| mode | what it is | status in `cbvault` |
+|---|---|---|
+| `0x00` | stored verbatim | **decoded, verified** |
+| `0x01` | LZ: 16-bit control words, up to 16 tokens per group | **decoded, verified** |
+| `0x02` | Huffman over bytes, explicit-path table | **decoded, verified** |
+| `0x03` | Huffman over *tokens*; **holds every database file** | **decoded, verified** |
 
 Per-member compression ratios (packed ÷ size), measured: `cbm` 0.072,
 `cbl` 0.143, `cbj` 0.176, `cbh` 0.432, `cko` 0.768, `cbg` 0.802.

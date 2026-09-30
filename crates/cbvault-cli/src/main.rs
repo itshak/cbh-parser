@@ -17,7 +17,7 @@ const USAGE: &str = "usage:
   cbvault verify <db> [--threads N] [--batch-size N] [--limit-failures N] [--json]
   cbvault pgn    <db> [out] [--from ID] [--to ID] [--threads N] [--batch-size N] [--json]
   cbvault archive list <archive> [--json] [--password P]
-  cbvault archive extract <archive> <dir> [--only NAME] [--json] [--password P]
+  cbvault archive extract <archive> <dir> [--only NAME] [--threads N] [--json] [--password P]
 
 The PGN goes to `out`, or to stdout when no path is given, so it can be piped.
 The export report always goes to stderr, so stdout stays pure PGN.
@@ -283,24 +283,30 @@ fn json_str(s: &str) -> String {
     out.push('"');
     out
 }
-/// `cbvault archive extract <archive> <dir> [--only NAME] [--json]`
+/// `cbvault archive extract <archive> <dir> [--only NAME] [--threads N] [--json]`
 ///
-/// Writes the members this build can decode and **refuses the rest**, rather than
-/// writing bytes it did not decode. On the reference archive that is 2,228 of
-/// 3,871 members: the block framing of modes 1, 2 and 3 is not yet identified and
-/// cannot be invented, and a database that is silently three-fifths present is
-/// worse than one that is visibly short. Exits non-zero when anything was
+/// Writes every member it decodes and **refuses the rest**, rather than writing
+/// bytes it did not decode: a database that is silently three-fifths present is
+/// worse than one that is visibly short. All four of the container's block
+/// modes are decoded, so on the reference archive this writes **all 3,871
+/// members** — every byte of the archive.
+///
+/// With `--only`, or with one thread, the members are handled one at a time so
+/// that a failure names every member it affected; otherwise the fast parallel
+/// path runs, which stops at the first failure. Exits non-zero when anything was
 /// skipped, so a script cannot mistake a partial extraction for a whole one.
 fn run_archive_extract(mut args: impl Iterator<Item = String>) -> Result<bool, Box<dyn std::error::Error>> {
     let mut path: Option<String> = None;
     let mut dir: Option<String> = None;
     let mut only: Option<String> = None;
     let mut password: Option<String> = None;
+    let mut threads = default_threads();
     let mut json = false;
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--only" => only = Some(args.next().ok_or("--only requires a member name")?),
             "--password" => password = Some(args.next().ok_or("--password requires a value")?),
+            "--threads" => threads = args.next().ok_or("--threads requires a number")?.parse()?,
             "--json" => json = true,
             other if !other.starts_with('-') => {
                 if path.is_none() {
@@ -318,14 +324,41 @@ fn run_archive_extract(mut args: impl Iterator<Item = String>) -> Result<bool, B
     let archive = open_archive(&path, password.as_deref())?;
     let dir = std::path::Path::new(&dir);
 
-    let wanted: Vec<&Member> = match &only {
+    // A single member, or a single thread: the reporting path. It decodes one
+    // member at a time so a failure can be named per member instead of ending
+    // the run, which is what a partial archive needs to be useful.
+    if only.is_some() || threads <= 1 {
+        return extract_reporting(&archive, dir, only.as_deref(), json);
+    }
+
+    // The fast path: largest member first, one buffer per worker, every member
+    // independent. Stops at the first failure and names it.
+    let started = std::time::Instant::now();
+    let written = archive.extract_parallel(dir, threads)?;
+    let secs = started.elapsed().as_secs_f64();
+    let bytes: u64 = archive.list().iter().map(|m| m.size()).sum();
+    if json {
+        println!("{{\"written\":{},\"bytes\":{},\"skipped\":[]}}", written.len(), bytes);
+    } else {
+        println!("wrote {} members ({bytes} bytes) in {secs:.2} s on {threads} thread(s)", written.len());
+    }
+    Ok(true)
+}
+
+/// The reporting extraction: every member is attempted and failures are named.
+fn extract_reporting(
+    archive: &Archive,
+    dir: &std::path::Path,
+    only: Option<&str>,
+    json: bool,
+) -> Result<bool, Box<dyn std::error::Error>> {
+    let wanted: Vec<&Member> = match only {
         None => archive.list().iter().collect(),
         Some(name) => {
             let m = archive.find(name).ok_or_else(|| format!("no member named {name:?}"))?;
             vec![m]
         }
     };
-
     let mut written = 0u64;
     let mut bytes = 0u64;
     let mut skipped: Vec<String> = Vec::new();
@@ -354,18 +387,18 @@ fn run_archive_extract(mut args: impl Iterator<Item = String>) -> Result<bool, B
     } else {
         println!("wrote {written} members ({bytes} bytes)");
         if !skipped.is_empty() {
-            println!("skipped {} member(s) this build cannot decode:", skipped.len());
+            println!("skipped {} member(s):", skipped.len());
             for s in &skipped {
                 println!("  {s}");
             }
-            println!(
-                "mode 0x01 and mode 0x03 are not yet identified. Note that mode 0x03 is where this archive keeps \
-                 its database files, so an archive does not yet unarchive into a usable database. \
-                 See docs/format-spec-cbv.md."
-            );
         }
     }
     Ok(skipped.is_empty())
+}
+
+/// The worker count a run starts with: every core, or one when asked for one.
+fn default_threads() -> usize {
+    std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1)
 }
 
 fn run_archive(mut args: impl Iterator<Item = String>) -> Result<bool, Box<dyn std::error::Error>> {

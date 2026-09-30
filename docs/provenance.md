@@ -1,6 +1,6 @@
 # Provenance ledger
 
-Every module in this repository belongs to exactly one of four regimes. This ledger
+Every module in this repository belongs to exactly one of five regimes. This ledger
 is normative: a change that adds or moves a module MUST add or move its row here
 (AGENTS.md; the CI check of task 1.3 enforces the mechanical part).
 
@@ -9,9 +9,16 @@ is normative: a change that adds or moves a module MUST add or move its row here
 | Regime | Sources | Allowed | Mechanics |
 |---|---|---|---|
 | **Port (MIT)** | `cbformat` in `oschess-cb-bridge` | copy + modify | Keep the upstream MIT notice; add a per-file "modified by cbvault" note; ledger row here; listed in `THIRD_PARTY_NOTICES.md` |
+| **Clean-room** | A specification of *facts* written under the two-room protocol below (for `.cbv`/`.cbz`: `docs/format-spec-uncbv.md`) | implement from the specification alone | The implementer never sees the GPL source, never runs the GPL binary, and neither role sees the other's work; the specification is a reviewed, frozen artefact in `docs/`; parity against the reference run as a separate process is the acceptance test; ledger rows here; audit trail in `docs/research/03-clean-room-audit.md` |
 | **Facts-only** | Morphy's `format/v1`/`format/v2`/modern specs, ChessBase help pages, public reverse-engineering threads, the ancestor's own `docs/format-notes.md` (MIT, for its *facts*) | Re-express facts in our own words and code | Cite the source per fact in `SPEC.md`; never copy text or code; raw format data (e.g. byte permutations) carries its source in the source file |
 | **Oracle-only** | `scidb`/`cbh2si4`, `libcbh`, `uncbv`, `Source2Metal` (GPL), `asdfjkl/cbh2pgn` (MIT), `morphy` (unlicensed), ChessBase's own PGN exports | Run as separate processes in tests | Scripts under `scripts/oracles/`; env-gated (`CBH_ORACLE=1`); never linked, never vendored into the build; no code copied — the single exception is the 256-byte table data from the MIT `asdfjkl` project, attributed in `THIRD_PARTY_NOTICES.md` |
 | **Original** | This project | — | Ledger row; no external source to cite |
+
+Clean-room and Oracle-only are different regimes and must not be blurred. An
+**oracle** supplies *behaviour* to compare against and is run, never read.
+Clean-room work reads a GPL reference, but only in Room 1 and only to write down
+facts; what reaches the tree is Room 2's implementation, written from the
+specification alone.
 
 The pinned ancestor for every Port row: `oschess-cb-bridge` at
 `ca9e8f8e4389edd6430f02a14b33ff53552bcadc` (MIT, "Copyright (c) 2026 the
@@ -41,6 +48,34 @@ The container readers (`cbvault-format` archive reader, `.cbz` decryption, the
    malformed member tables are covered by our own fixtures (tasks 5.2, 6.3).
 6. **Review gate.** The commit that lands the container reader is reviewed against
    this protocol; ledger rows stay **original** with the facts-sheet reference.
+
+### The second round: the two-room clean room
+
+The protocol above was enough to read the container and to decode mode `0x02` by
+inference, and **not** enough to reach mode `0x03` — with the GPL source off
+limits, the block framing had to be guessed from statistical evidence and was
+not. So the process was tightened rather than the rule relaxed
+(`openspec/changes/uncbv-clean-room-parity/`):
+
+1. **Room 1 — the specifier** reads the GPL reference and writes
+   `docs/format-spec-uncbv.md`: byte offsets, field widths, endianness,
+   constants, algorithms as procedures, control flow as *observable behaviour*,
+   and error conditions. No code, no pseudocode mirroring the source's structure,
+   no identifier, module or file names, no comments, no error strings.
+2. **The hygiene review** applies one test to every paragraph of that document:
+   *could this sentence have been written by someone who never opened the
+   reference?* If not, it comes out.
+3. **Room 2 — the implementer** receives the frozen specification and the
+   existing tree, and nothing else. It does not read the reference's source or
+   tests, and does not run its binary.
+4. **The parity run is the lead's**, after Room 2 finished — so the party that
+   wrote the code never ran the program it is compared against.
+5. **The audit trail** is `docs/research/03-clean-room-audit.md`, written after
+   the fact and checked against the repository.
+
+This is now the project's **template for any future parity work** against a
+reference implementation whose licence forbids copying: the artefact is a
+specification of facts, and the claim is behavioural parity, measured.
 ## Architecture decision records
 
 `openspec/adr/` holds the decisions this tree is held to, each with the numbers
@@ -107,8 +142,16 @@ State: `planned` until the porting task lands; then `ported`/`ported (chess swap
 | `cbvault-format::cbh::textblocks` (`.cbl`) and `cbh::texttable` (`.cbtt`) | Original (task 2.3): record framing from our inspection of the local Mega 2025; the ancestor reads neither; `.cbtt`'s record content stays unverified (`SPEC.md` unknowns) |
 | `cbvault-format::cbh::entities` reading of `.cbe` (teams) | The file uses the ancestor's entity-file framing; reading it as the teams namebase is ours (task 2.3) |
 | `cbvault-format` — archive reader (`.cbv`, `.cbz`) | Clean-room per the protocol above; facts in `docs/research/00-cbv-facts.md`. The `.cbz` scheme was established against a sample/plaintext pair in the oracle's fixtures (`small.cbz` / `decrypted_small.cbv`); the oracle's source was never opened |
+| `cbvault-format::archive::codec` — the block walk and the `Codec` seam | **Clean-room** (`uncbv-clean-room-parity`): Room 2, written from `docs/format-spec-uncbv.md` alone. Block framing (`u16 LE` payload length, unnamed word, payload whose first byte is the mode) and the mode-per-block rule |
+| `cbvault-format::archive::lz` — mode `0x01`, and mode `0x03`'s second stage | **Clean-room**, as above: 16-bit control words, up to 16 tokens per group most-significant-bit first, the tag-nibble length and offset encoding, the whole-member window and the unit copy |
+| `cbvault-format::archive::huffman` — mode `0x02`, and mode `0x03`'s first stage | **Clean-room**, as above. It supersedes the earlier clean-room `huffman` row (below), whose block structure came from a public reverse-engineering write-up; both decoders are verified against the reference process's output and the owner's extracted files, and every measurement is in `docs/cbv-reference.md` |
+| `cbvault-format::archive::blocks` — the block builders the container tests encode from | **Clean-room**, as above: it writes synthetic blocks from the specification so the tests state their expected output instead of asserting against a blob. No real archive's bytes are copied into a fixture |
+| `cbvault-format::des` — the `.cbz` key derivation | Clean-room per the protocol above; rules stated in `docs/format-spec-uncbv.md` §7.1 and `docs/cbv-reference.md` §9. **Corrected after first landing**: the reader originally zero-padded a short password and truncated a long one, both wrong; it now repeats below eight bytes and folds above eight, verified against three samples exercising one rule each. The FIPS 46-3 tables and the cipher are written from the published standard |
 | `docs/research/02-cbv-state-of-the-art.md` — the landscape survey | Facts-only: public documentation, the oracle's public README and `Cargo.toml`, public reverse-engineering, and measurements taken on the owner's own archive. No GPL source was read to produce it. |
-| `cbvault-format::archive::huffman` — the mode-2 member codec | Clean-room, like the reader above. The block structure came from a public reverse-engineering write-up (CC BY-SA, `reverseengineering.stackexchange.com` q8593, a facts-only source under this ledger); it was then **verified** against the oracle's output and the owner's extracted files, and every measurement it relies on is in `docs/format-spec-cbv.md` |
+| `docs/format-spec-uncbv.md` — the two-room specification (Room 1's deliverable) | Clean-room, Room 1: written by an agent that read the GPL reference, and constrained to facts — offsets, widths, constants, algorithms as procedures, observable behaviour. Reviewed by the hygiene test ("could this sentence have been written by someone who never opened the reference?") and frozen before Room 2 started. Its scope, including what it does *not* establish, is in the document itself |
+| `docs/cbv-reference.md` — the normative `.cbv`/`.cbz` format description | Original, written in this repository from `docs/format-spec-uncbv.md` and our own measurements; every claim in it is falsifiable and most were falsifiable before it was written (§11) |
+| `docs/research/03-clean-room-audit.md` — the two-room audit trail | Original, written after the fact by the lead and checked against the repository: who filled which room, what the barrier was, and what parity was and was not measured |
+| `cbvault-format::archive::huffman` — the mode-2 member codec (earlier landing) | Clean-room, like the reader above. The block structure came from a public reverse-engineering write-up (CC BY-SA, `reverseengineering.stackexchange.com` q8593, a facts-only source under this ledger); it was then **verified** against the oracle's output and the owner's extracted files, and every measurement it relies on is in `docs/format-spec-cbv.md`. **Superseded** by the two-room `archive::huffman` row above |
 | `cbvault` — `Database`, `GameIter`, `decode_game_into`, archive façade | Task 6.1, 5.3 |
 | `cbvault::replay` — `verify_parallel`, Rayon chunk worker | Original (`fast-decode-and-parallel-replay`) |
 | `cbvault::pgn::parallel` — `export_parallel` / `export_range`, Rayon export pipeline | Original (`pgn-export-sota-performance`): modelled on our own `replay::verify_parallel`, byte-identical to the sequential writer by construction (id-ordered chunks, one `write_all` per chunk) |

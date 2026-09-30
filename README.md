@@ -23,8 +23,10 @@
 
 > ## ⚠️ This library is a work in progress. Read this before you rely on it.
 >
-> The classic `.cbh` family is genuinely implemented and tested. **The archive
-> container is only partly readable, and 2CBH has no move decoder yet.** The
+> The classic `.cbh` family is genuinely implemented and tested, and **`.cbv`
+> archives now unarchive completely — every member, byte-identical to the
+> reference extractor.** **2CBH still has no move decoder**, and derived
+> accelerator files are not read. The
 > [What is not supported yet](#what-is-not-supported-yet) section below is
 > specific and states exactly what is missing. Please read it before you decide
 > whether this fits your use — a short README that overstates what works is worse
@@ -57,23 +59,36 @@
   stays standard. Against a 419,385-game ChessBase export, **407,350 games (97.1 %)
   match byte for byte**; the remaining differences are five deliberate,
   documented deviations plus a small residue.
-- **`.cbv` archives: the container is complete; it does NOT yet unarchive into a
-  database.** This is the important caveat in this README, so it is stated
-  plainly rather than buried in a percentage:
+- **`.cbv` archives unarchive completely — byte-for-byte, and ~9× faster than
+  `uncbv`.** All four of the container's block modes are decoded, so all
+  **3,871 of 3,871 members** and **100 % of the archive's 3.61 GB** come out,
+  including the 512 MB `.cbh`, the 1.25 GB `.cbj`, `.cbg` and `.cba`. Every
+  member is **byte-identical to the reference extractor's own output**, on all
+  four test corpora. `.cbz` is fully supported, including all three password
+  lengths.
 
-  > **You cannot get the `.cbh` (or `.cbg`, `.cbj`, `.cba`) out of a `.cbv` yet.**
-  > All twelve of the reference archive's database files are in mode `0x03`,
-  > which is not decoded. Extract one and you get zero bytes and a typed error.
-  > What *does* extract is the archive's images — 2,286 of 3,871 members, but
-  > only **3.6 % of its bytes**, and 2,205 of those members are `.jpg`.
+  > **How this was reached without copying anything.** `uncbv` is GPL-3.0, so
+  > this project used a **two-room clean room**: one agent read the reference
+  > and wrote a specification of *facts*; a second implemented from that frozen
+  > specification alone, with no access to the reference's source, tests or
+  > binary. The barrier, the hygiene review and the parity result are recorded in
+  > [`docs/research/03-clean-room-audit.md`](docs/research/03-clean-room-audit.md),
+  > and the format itself in
+  > [`docs/cbv-reference.md`](docs/cbv-reference.md). The licence, not the
+  > format, was the obstacle.
 
-  The member *count* (59 %) is a misleading metric and the byte count (3.6 %)
-  is the honest one. The container itself is solid: the member table is parsed
-  and self-validated for all 3,871 members, and `.cbz` works fully. See
-  [Not supported yet](#what-is-not-supported-yet).
-  For the full landscape of what exists, what is established, and which compression
-  family the unsolved mode belongs to, see
-  [`docs/research/02-cbv-state-of-the-art.md`](docs/research/02-cbv-state-of-the-art.md).
+  | | `uncbv` (GPL, oracle) | `cbvault` |
+  |---|---|---|
+  | extract the 1.74 GB reference archive | 66.4–70.3 s | **7.1 s** |
+  | decoded throughput | 51–54 MB/s | **504 MB/s** |
+  | members extracted | 3,871 / 3,871 | **3,871 / 3,871** |
+  | bytes matching its output | — | **3,607,876,417 (100 %)** |
+  | licence | GPL-3.0 | **MIT** |
+
+  Measured on a 10-core Apple Silicon machine, both writing to disk, three runs
+  each; the reference's spread is reported as a range rather than a single
+  number. Full method and caveats in
+  [`.cbv` and `.cbz`](#cbv-and-cbz-the-whole-archive).
 - **2CBH: the container is proven, the moves are not.** Fixed 192-byte records and
   record framing are verified over 220,418 records. **The `.2cbg` move codec is not
   decoded**, so a 2CBH database yields its game list and tags today, but no moves.
@@ -98,8 +113,8 @@
 | Sink-based conversion, ordered parallel | **read** | `for_each_game`, `convert_parallel` |
 | PGN export | **read** | sequential and parallel, byte-identical output |
 | `.cbv` container | **read** | table parsed and validated for every member |
-| `.cbv` extraction, modes 1/3 | **not decoded** | modes `0x00` and `0x02` (59.0 %) decode exactly |
-| `.cbz` | **read** | DES-ECB, key = the password's first eight bytes; verified byte-exact over a 3,000-byte sample. Passwords not exactly eight bytes are an open question |
+| `.cbv` extraction, all four modes | **read** | 3,871 / 3,871 members, 100 % of bytes, byte-identical to the reference; ~9× faster |
+| `.cbz` | **read** | DES-ECB; three key rules (repeat / as-is / fold) verified against the reference's own samples |
 | 2CBH container | **read** | framing proven over 220,418 records |
 | 2CBH `.2cbg` move codec | **not decoded** | yields tags, not `moves2` |
 | Boosters, derived accelerators | **not read** | tolerated and ignored, by design |
@@ -426,116 +441,148 @@ usage:
   cbvault info   <db> [--games N] [--json]
   cbvault verify <db> [--threads N] [--batch-size N] [--limit-failures N] [--json]
   cbvault pgn    <db> [out] [--from ID] [--to ID] [--threads N] [--batch-size N] [--json]
-  cbvault archive list <archive> [--json]
-  cbvault archive extract <archive> <dir> [--only NAME] [--json]
+  cbvault archive list <archive> [--password P] [--json]
+  cbvault archive extract <archive> <dir> [--only NAME] [--threads N] [--password P] [--json]
 
 ## What is not supported yet
 
 This is the section to read. Everything here is genuinely unfinished, with the
 evidence for what was tried and why it did not work.
 
-### The `.cbv` compression codec is not solved
+### `.cbv` and `.cbz`: the whole archive
 
-One of four modes decodes; three do not. Measured on the 3,871-member reference
-archive:
+A `.cbv` is a container of 3,871 named members — a database, its assets and its
+thumbnails — each compressed independently. **All of it extracts**, and what comes
+out is byte-for-byte what the reference implementation produces.
 
-| mode | members | state |
+### The codec
+
+A member's stream is a run of **blocks**, and each block names one of four
+transforms:
+
+| mode | transform | members (by first block) |
 |---|---|---|
-| `0x00` | **2,228 (57.6 %)** | **decoded and verified** — stored verbatim |
-| `0x01` | 68 | **not decoded** |
-| `0x02` | 58 | **decoded and verified** — Huffman; 38 of the 58 byte-exact, 20 stop on an unidentified trailing block |
-| `0x03` | 1,517 | **not decoded** — the same table over *tokens*; holds every database file |
+| `0x00` | **stored** — the payload verbatim | 2,228 |
+| `0x01` | **LZ** — a 16-token-per-group token grammar | 68 |
+| `0x02` | **Huffman** — a per-block 256-entry prefix code | 58 |
+| `0x03` | **Huffman, then LZ** — holds every database file | 1,517 |
 
-So 2,286 of 3,871 members extract — and that is **3.6 % of the archive's bytes**,
-1.8 % of its real content. The rest reports a typed error and is never written to
-disk, so no extraction can quietly produce wrong bytes.
+All four are decoded. The mode is a property of a **block**, not of a member, and
+130 members mix them across their blocks — a reader that decides the mode once
+per member is wrong on those.
 
-### The metric that matters, and why the other one misleads
+Three details are load-bearing and each is easy to get wrong:
 
-| | members | bytes packed |
-|---|---|---|
-| extractable today | 2,286 of 3,871 (**59 %**) | 63,374,719 of 1,739,254,607 (**3.6 %**) |
-| the twelve database files | **0 of 12** | 1,601,662,129 of 1,739,254,607 (**92.1 %**) |
+- the Huffman block's decoded length is **big-endian**, while every other length
+  in the container is little-endian;
+- a block's final symbol routinely ends in the **padding** of the last byte, so
+  the exhaustion test is "past the end of the input", not "fewer than *n* bits
+  left";
+- the LZ back-reference window spans the **whole member**, not one block, and the
+  copy is a unit copy — 34,300 back-references in the reference archive overlap
+  their own destination.
 
-The 2,228 stored members are overwhelmingly **images** (2,205 `.jpg`), which is
-why the member count looks healthy. Every database file is in mode `0x03`:
+The full field-by-field account is
+[`docs/cbv-reference.md`](docs/cbv-reference.md), whose §10 states plainly what is
+*not* established.
 
-| file | packed | size | extractable |
+### Parity, measured against the reference process
+
+| corpus | members | byte-identical | bytes compared |
 |---|---|---|---|
-| `Mega Database 2025.cbj` | 235,024,425 | 1,338,134,312 | **no** |
-| `Mega Database 2025.cbg` | 1,004,889,211 | 1,253,435,766 | **no** |
-| `Mega Database 2025.cbh` | 221,529,302 | 512,951,520 | **no** |
-| `Mega Database 2025.cba` | 92,025,702 | 209,593,761 | **no** |
-| `… .cko .cpo .cbe .cbtt .cbs .cbc .cbl .cbm` | 148,194,841 | 62,693,255 | **no** |
+| `twic1134.cbv` | 13 | **13 / 13** | 1,749,596 |
+| reference archive | 3,871 | **3,871 / 3,871** | 3,607,876,417 (3.61 GB) |
+| `small.cbz` — password `password` | 12 | **12 / 12** | 1,017 |
+| `small2.cbz` — password `pass` | 12 | **12 / 12** | 1,017 |
+| `small3.cbz` — password `my long password` | 12 | **12 / 12** | 1,017 |
 
-**An archive does not yet unarchive into a usable database.** Mode `0x03` uses
-the same Huffman table as mode `0x02` but over *tokens* — literals and
-back-references sharing one alphabet — and that grammar is the open problem.
+Not a sample and not a spot check: every member of every corpus, compared against
+the reference extractor's **own output**, and in the reverse direction too — files
+it wrote that the member table does not name — because parity of the bytes is not
+parity of the *set*.
 
-What was ruled out, so that nobody repeats it: every stream was offered to zlib
-(wrapped and raw), gzip, bzip2, lzma, xz, lzma-alone, zstd and lz4 at every
-offset in its first 24 bytes — nothing decodes. It is not a byte-aligned LZ
-either: mode-1 streams visibly contain their own plaintext interleaved with
-control bytes, but a shortest-edit alignment of packed against plaintext **has no
-solution at all** for the smallest exact pair, which is the signature of a token
-stream whose boundaries are not byte-aligned. Around 6,000 candidate
-bit-oriented and byte-oriented LZ grammars were swept against that pair (flag
-widths, length codes, distance codes, biases, window sizes); none reproduced it.
-Mode 3 carries no plaintext at all — a longest verbatim run of 2–3 bytes on a
-29 KB member, the signature of an entropy coder. The container's only
-plaintext-bearing redundancy is a 35-to-105-byte excerpt whose position inside the
-content is not recorded anywhere the reader can see, so it cannot be used to align
-a stream against its plaintext. The remaining seam is one trait — `Codec` — and
-implementing a mode needs no change to `Archive` or to extraction.
+### Performance
 
-### `.cbz` is read, and the scheme is known
+Both figures are full extractions of the 1.74 GB archive **to disk**, on the same
+machine, both writing 3.61 GB:
 
-A `.cbz` is a `.cbv` whose every byte is enciphered with **DES in ECB**, under a
-key that is **the password's first eight bytes**. There is no plaintext header,
-no salt and no IV: the container's own header is enciphered like everything
-else.
+| | `uncbv` | `cbvault` | |
+|---|---|---|---|
+| wall clock | 66.4 / 66.8 / 70.3 s | **7.1 s** | **9.4× faster** |
+| decoded throughput | 51.4 / 54.1 / 54.4 MB/s | **504 MB/s** | |
+| single-threaded | not published | 15.99 s (226 MB/s) | |
+| licence | GPL-3.0 | **MIT** | |
 
-That is an observation rather than an inference. The oracle's fixture directory
-carries `small.cbz` beside its plaintext `decrypted_small.cbv`, and the scheme
-was determined against that pair — it reproduces **all 3,000 bytes** of it, the
-archive then lists its 12 members, and `small.cbh` decodes to exactly the bytes
-the oracle extracted. The oracle's source was never read; its binary was run and
-its output compared.
+Decoding alone, with nothing written: 13.87 s single-threaded (260 MB/s), 6.43 s
+on ten workers (561 MB/s). Extraction plateaus at about four workers because
+writing 3.61 GB is then the wall clock rather than the codec, which is why the
+decode-only figure is quoted separately — otherwise the number describes the disk
+rather than the decoder.
 
-The container's header is therefore also the password check: a password is
-right when the deciphered first block is shaped like a header. That costs **one
-eight-byte read** — opening a 1.7 GB protected archive never deciphers the file
-to find out, and neither does listing it or extracting a single member. An ECB
-block depends only on itself, so each member is deciphered as it is read and
-extraction holds one member at a time.
+What buys it: a two-level Huffman lookup table (9-bit root, 6-bit secondary)
+instead of a bit-at-a-time walk, a 64-bit bit buffer refilled eight bytes at a
+time, bulk literal copies, `memmove` back-references, a zero-allocation hot path
+through one reusable `Scratch`, and largest-member-first parallel extraction.
+
+**ChessBase publishes no speed claim for unarchiving a `.cbv`**, so there is no
+vendor figure to beat. Its only published figure is a *space* one — "a space
+saving of about 30 % to 50 %" — which this project does not compete with. That
+is reported as a negative finding rather than quietly omitted.
+
+### `.cbz` is fully supported
+
+A `.cbz` is a `.cbv` whose every byte is enciphered with **DES in ECB**. There is
+no plaintext header, no salt and no IV, which is what makes the container's own
+header the password check.
+
+The key is eight bytes, and the rule **depends on the password's length**:
+
+| password length | key |
+|---|---|
+| exactly 8 | those eight bytes, unchanged |
+| fewer than 8 | the password **repeated** until eight bytes are covered |
+| more than 8 | **folded** — accumulator `i mod 8` is doubled, then XORed with byte `i` |
+
+All three are verified against the reference's own three samples, one per rule,
+and all three are now tests.
 
 ```console
 $ cbvault archive list Mega.cbz --password 'my password'
 $ cbvault archive extract Mega.cbz ./out --password 'my password'
 ```
 
-A wrong password reports `wrong password`. It is not reported as a corrupt
-archive, because the file is not corrupt: it is a well-formed container under a
-key the caller did not supply.
+A wrong password reports `wrong password`, not corruption — the file is not
+corrupt, it is a well-formed container under a key the caller did not supply.
+Checking costs **one eight-byte read**, so opening a 1.7 GB protected archive
+never deciphers the file to find out; and because an ECB block depends only on
+itself, each member is deciphered as it is read and extraction holds one member
+at a time.
 
-**One thing is still open.** The key rule for a password that is not exactly
-eight bytes long. This reader takes the first eight and zero-pads a shorter one.
-The reference extractor is self-inconsistent there — it panics below eight
-bytes, and above them deciphers under a key that could not be identified, with
-`password22` and `password33` producing byte-identical output while
-`passwordAA`, `passwordAB`, `password99` and `password11` each differ. Rather
-than copy an unexplained path, the eight-byte rule that *is* verified over a
-whole sample is what ships. `docs/format-spec-cbv.md` lists every hypothesis
-that was tested and rejected.
+### How parity was reached without copying anything
 
-```
+`uncbv` is GPL-3.0 and cannot be linked or vendored into an MIT library. The
+obstacle was never the format — it was learning from a GPL source and staying
+clean. The answer this project adopted is the **two-room clean room**: one agent
+read the reference and wrote a specification of *facts*; the specification was
+reviewed for hygiene and **frozen**; a second agent implemented from that
+specification alone, with no access to the reference's source, tests or binary.
+
+Parity was then proved by the lead — the party that wrote no code — running the
+reference as a separate process and comparing outputs, which the project's
+existing oracle discipline already permitted.
+
+The barrier, the hygiene review, the post-freeze corrections and the
+member-by-member parity result are in
+[`docs/research/03-clean-room-audit.md`](docs/research/03-clean-room-audit.md).
+The audit is explicit about its limits, including that this is an engineering
+protocol rather than a legal opinion.
 
 `info` reports the record count and the namebase sizes. `verify` decodes and
 replays every game, reporting typed failures. `pgn` writes PGN to `out` or to
 stdout, so it pipes; **the export report always goes to stderr, so stdout stays
-pure PGN**. `archive list` and `archive extract` read `.cbv` containers — and
-`extract` stops at the first member it cannot decode, so a partial extraction is
-never mistaken for a complete one.
+pure PGN**. `archive list` and `archive extract` read `.cbv` and `.cbz`
+containers; `extract` never writes bytes it did not decode, and exits non-zero if
+anything was skipped, so a partial extraction is never mistaken for a whole one.
 
 ```bash
 cbvault info "Mega Database 2025/Mega Database 2025"
@@ -658,6 +705,9 @@ The full hand-off contract, with recipes and the measured numbers, is
 | [`docs/bridge.md`](docs/bridge.md) | the sink contract, read-only serving, search, measured numbers, known limits |
 | [`docs/format-spec.md`](docs/format-spec.md) | the classic format field by field; §10 lists the five deliberate PGN deviations |
 | [`docs/format-spec-cbv.md`](docs/format-spec-cbv.md) | the `.cbv` container, every fact with its evidence, and the negative results on the codec |
+| [`docs/cbv-reference.md`](docs/cbv-reference.md) | the reader-facing reference for `.cbv`/`.cbz`: every field, all four block modes, and what is *not* established |
+| [`docs/format-spec-uncbv.md`](docs/format-spec-uncbv.md) | the frozen clean-room hand-off specification the codec was written from |
+| [`docs/research/03-clean-room-audit.md`](docs/research/03-clean-room-audit.md) | the two-room barrier, the hygiene review, and the member-by-member parity result |
 | [`docs/format-spec-2cbh.md`](docs/format-spec-2cbh.md) | the 2CBH format, with §10 stating what would close each unknown |
 | [`docs/provenance.md`](docs/provenance.md) | per-module provenance: ported, clean-room, or original |
 | [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) | attribution, dependencies, and the oracles used as tests only |
@@ -670,9 +720,11 @@ The full hand-off contract, with recipes and the measured numbers, is
 The on-disk format knowledge is a **port of `cbformat`** (MIT) from the
 `oschess-cb-bridge` project, with attribution; ported files keep the upstream MIT
 notices. Its internal chess layer was **replaced wholesale** by `gigachess`, so
-there is no second chess implementation here. The `.cbv`/`.cbz` container support
-is a **clean-room implementation** from byte-level inspection, with `uncbv` used
-as a separate-process test oracle only — no implementation's source was read.
+there is no second chess implementation here. The `.cbv`/`.cbz` container and
+codec support is a **clean-room implementation** produced under a documented
+two-room protocol, with `uncbv` (GPL-3.0) used as a separate-process test oracle
+only — **no reference implementation's source was read by the party that wrote
+the code.** See [`docs/research/03-clean-room-audit.md`](docs/research/03-clean-room-audit.md).
 
 - **Facts-only references** (no code or text reused): Yarin's (Jimmy Mårdell's)
   `morphy` specifications, unlicensed — format facts only; and ChessBase's public

@@ -43,10 +43,6 @@ macro_rules! archive_or_skip {
 
 /// The measured facts of the reference archive.
 const MEMBERS: usize = 3_871;
-/// Members whose stream is stored verbatim.
-const STORED_MEMBERS: usize = 2_228;
-/// Members whose stream is Huffman-coded, and which this build decodes.
-const HUFFMAN_MEMBERS: usize = 58;
 const SIZE: u64 = 1_739_924_298;
 const DIRECTORY_END: u64 = 0xA37FB;
 const RECORD: u64 = 173;
@@ -153,9 +149,7 @@ fn a_stored_member_of_the_reference_archive_decodes_exactly() {
     let Some(beside) = path.parent() else { return };
     let mut checked = 0;
     for member in a.list().iter().filter(|m| m.is_asset()) {
-        if a.stream(member).ok().and_then(|s| Head::parse(member.name().as_ref(), &s).ok()).map(|h| h.mode())
-            != Some(codec::Mode::STORED)
-        {
+        if !is_wholly_stored(&a, member) {
             continue;
         }
         let Some((folder, file)) = member.name().split_once('\\') else { continue };
@@ -181,80 +175,140 @@ fn a_stored_member_of_the_reference_archive_decodes_exactly() {
     assert!(checked > 0, "no stored asset was compared with its extracted copy");
 }
 
-/// Nine records of the reference archive claim a `size` their stored stream
-/// does not reach. They are reported, never written out.
+/// Every wholly stored member of the reference archive produces exactly the
+/// `size` its record claims.
+///
+/// This is the check that the old five-byte-head reader could not make. It
+/// reported **nine** records whose stream was shorter than their `size`; with
+/// the block framing in place there are **none** — those nine were an artefact
+/// of subtracting a fixed head from a stream that is really a run of blocks, not
+/// a header plus a body. The assertion is the negative one on purpose: a reader
+/// that reintroduces a fixed head will fail here rather than silently keep the
+/// old count.
 #[test]
-fn stored_records_whose_stream_is_shorter_than_their_size_are_reported() {
+fn every_stored_member_of_the_reference_archive_matches_its_recorded_size() {
     let path = archive_or_skip!();
     let a = Archive::open(&path).expect("open the reference .cbv");
-    let mut short = Vec::new();
+    let mut short: Vec<(String, u64, u64)> = Vec::new();
     for member in a.list() {
-        if !a.can_decode(member).unwrap_or(false) {
-            continue;
-        }
-        // only a stored stream is the member's own length; a Huffman one is
-        // shorter by construction and is not a "short record"
-        if a.stream(member).ok().and_then(|s| Head::parse(member.name().as_ref(), &s).ok()).map(|h| h.mode())
-            != Some(codec::Mode::STORED)
-        {
+        // Only a wholly stored stream is the member's own length; a compressed
+        // one is shorter by construction and is not a "short record".
+        if !is_wholly_stored(&a, member) {
             continue;
         }
         let Ok(stream) = a.stream(member) else { continue };
-        if (stream.len() as u64).saturating_sub(codec::HEAD as u64) != member.size() {
-            short.push(member.name().to_owned());
-            // and the codec refuses it rather than handing back the wrong bytes
-            assert!(matches!(a.decode(member), Err(Error::Format(_))), "{}", member.name());
+        if stored_len(&stream) != member.size() {
+            // Reported, not hidden: the reader says the stream and the table
+            // disagree rather than handing back the wrong number of bytes.
+            short.push((member.name().to_owned(), member.size(), stored_len(&stream)));
         }
     }
-    assert_eq!(short.len(), 9, "the nine measured records: {short:?}");
+    assert!(short.is_empty(), "a wholly stored member must produce its recorded size: {short:?}");
 }
 
-/// The reference archive's mode census, as measured, and the number of members
-/// this build can decode.
+/// Every member of the reference archive decodes, in every mode.
 ///
-/// `STORED_MEMBERS` and `HUFFMAN_MEMBERS` are what the mode byte says. A member
-/// this build cannot *finish* decoding — 20 of the Huffman ones stop on a
-/// trailing block that is not identified — reports an error and is never
-/// written, so the shortfall is safe rather than silent.
+/// This is the parity claim, on the real data, as a test: each member is decoded
+/// and compared byte for byte with the copy the owner already extracted beside
+/// the archive. `.ini` is the one documented exception — ChessBase rewrote the
+/// local copy with usage counters, so the two differ for a reason outside the
+/// codec — and it is named rather than skipped silently.
 #[test]
-fn the_compression_modes_of_the_reference_archive_are_the_measured_ones() {
+fn every_member_of_the_reference_archive_decodes_to_its_extracted_copy() {
     let path = archive_or_skip!();
     let a = Archive::open(&path).expect("open the reference .cbv");
-    let (mut stored, mut huffman, mut unresolved) = (0usize, 0usize, 0usize);
-    for m in a.list() {
-        match a.stream(m).ok().and_then(|s| Head::parse(m.name().as_ref(), &s).ok()).map(|h| h.mode()) {
-            Some(codec::Mode::HUFFMAN) => huffman += 1,
-            Some(codec::Mode::STORED) => stored += 1,
-            _ => unresolved += 1,
+    let Some(beside) = path.parent() else { return };
+    let mut out = Vec::new();
+    let mut scratch = Scratch::new();
+    let (mut checked, mut skipped) = (0usize, 0usize);
+    let mut differ: Vec<String> = Vec::new();
+    // The one member whose extracted copy is not the archive's own bytes:
+    // ChessBase rewrote it locally with usage counters, so the two differ for a
+    // reason outside the codec. Named, checked, and not counted as parity.
+    const REWRITTEN_LOCALLY: &str = "Mega Database 2025.ini";
+    for member in a.list() {
+        out.clear();
+        scratch.clear();
+        if let Err(e) = a.decode_into(member, &mut out, &mut scratch) {
+            differ.push(format!("{}: {e}", member.name()));
+            continue;
         }
+        let Some((folder, file)) = member.name().split_once('\\') else {
+            let local = beside.join(member.name());
+            if !local.is_file() {
+                skipped += 1;
+                continue;
+            }
+            compare(member, &out, &local, &mut checked, &mut differ);
+            continue;
+        };
+        let local = beside.join(folder).join(file);
+        if !local.is_file() {
+            skipped += 1;
+            continue;
+        }
+        compare(member, &out, &local, &mut checked, &mut differ);
     }
-    assert_eq!(stored, STORED_MEMBERS, "the stored members, as measured");
-    assert_eq!(huffman, HUFFMAN_MEMBERS, "the Huffman members, as measured");
-    assert_eq!(unresolved, MEMBERS - STORED_MEMBERS - HUFFMAN_MEMBERS, "the rest");
-
-    // `can_decode` reads only a stream head, so it counts every member whose
-    // mode has a registered codec: stored plus Huffman, 2,286. Fully decoding
-    // all 58 Huffman members is the slow part and is not done here; 20 of them
-    // stop on a trailing block this build has not identified, and they report an
-    // error rather than bytes. See `docs/format-spec-cbv.md`.
-    let decodable = a.list().iter().filter(|m| a.can_decode(m).unwrap_or(false)).count();
-    assert_eq!(decodable, STORED_MEMBERS + HUFFMAN_MEMBERS, "every member whose mode has a codec");
+    // The exception is allowed, and only it: it must be the sole name in `differ`.
+    assert_eq!(
+        differ,
+        vec![format!("{REWRITTEN_LOCALLY}: 7174 bytes against 7642")],
+        "the only differing member is the documented one"
+    );
+    assert_eq!(checked, MEMBERS - 1 - skipped, "every other member with an extracted copy beside it");
+    // and it does decode to its declared size, which is the part the codec owns
+    let ini = a.find(REWRITTEN_LOCALLY).expect("the .ini is a member");
+    out.clear();
+    a.decode_into(ini, &mut out, &mut scratch).unwrap();
+    assert_eq!(out.len() as u64, ini.size(), ".ini decodes to its declared size");
 }
 
-#[test]
-fn an_unresolved_member_reports_its_mode_rather_than_its_bytes() {
-    let path = archive_or_skip!();
-    let a = Archive::open(&path).expect("open the reference .cbv");
-    let Some(member) = a.list().iter().find(|m| !a.can_decode(m).unwrap_or(false)) else {
-        panic!("the reference archive has members in unresolved modes");
-    };
-    match a.decode(member) {
-        Err(Error::CodecUnavailable { member: named, mode, .. }) => {
-            assert_eq!(named, member.name());
-            assert!((1..=3).contains(&mode), "an unresolved mode, got {mode:#04x}");
-        }
-        other => panic!("expected CodecUnavailable, got {other:?}"),
+/// Compares one decoded member with its extracted copy, counting it or naming
+/// the difference.
+fn compare(member: &Member, got: &[u8], local: &std::path::Path, checked: &mut usize, differ: &mut Vec<String>) {
+    let want = std::fs::read(local).expect("read the extracted copy");
+    if got == want {
+        *checked += 1;
+    } else {
+        differ.push(format!("{}: {} bytes against {}", member.name(), got.len(), want.len()));
     }
+}
+
+/// Whether every block of `member`'s stream is stored.
+///
+/// The mode is a property of a **block**, so this walks the whole stream: a
+/// member that starts stored and later switches mode is not wholly stored, and
+/// its length is not simply its payload.
+fn is_wholly_stored(a: &Archive, member: &Member) -> bool {
+    let Ok(stream) = a.stream(member) else { return false };
+    let mut at = 0usize;
+    let mut any = false;
+    while let Some(head) = BlockHead::parse(stream.get(at..).unwrap_or_default()) {
+        at += BLOCK_HEAD;
+        let Some(payload) = stream.get(at..at + usize::from(head.payload_len)) else { return false };
+        at += usize::from(head.payload_len);
+        if payload.first() != Some(&Mode::STORED) {
+            return false;
+        }
+        any = true;
+    }
+    any && at == stream.len()
+}
+
+/// The bytes a stored stream contributes: its payload, less the mode byte.
+fn stored_len(stream: &[u8]) -> u64 {
+    let mut total = 0u64;
+    let mut at = 0usize;
+    while let Some(head) = BlockHead::parse(stream.get(at..).unwrap_or_default()) {
+        at += BLOCK_HEAD;
+        let len = usize::from(head.payload_len);
+        let Some(payload) = stream.get(at..at + len) else { break };
+        at += len;
+        if payload.first() == Some(&Mode::STORED) {
+            total += (len - 1) as u64;
+        }
+    }
+    total
 }
 
 #[test]

@@ -3,9 +3,14 @@
 //! Everything the shared [`crate::error::Error`] reports — a bad magic, a short
 //! file, an I/O failure, a `.cbz` password that did not decrypt — comes through
 //! as [`Error::Format`], so those errors keep the crate's type and its detail.
-//! The archive adds one error of its own, [`Error::CodecUnavailable`], for the
-//! member streams whose compression this build cannot decode; see
-//! [`crate::archive::codec`].
+//! The archive adds two of its own: [`Error::Truncated`] for a stream that ends
+//! before its member does, and [`Error::UnsafeName`] for a name that would
+//! escape the destination directory.
+//!
+//! There is deliberately **no** "this mode cannot be decoded" variant. All four
+//! of the container's block modes are decoded (see [`crate::archive::codec`]),
+//! so a mode the reader does not know is corrupt input rather than a missing
+//! feature, and it is reported as one.
 
 use std::fmt;
 use std::path::Path;
@@ -21,20 +26,6 @@ pub enum Error {
     /// The shared format error model reported this: a bad magic, a corrupt or
     /// truncated record, a missing file, a wrong password.
     Format(FormatError),
-    /// A member's stream is in a compression mode this build cannot decode.
-    ///
-    /// Reported instead of the member's bytes, so that an extraction never
-    /// writes out something the reader did not actually decode. The member's
-    /// name and the mode it is in are carried along, because "1,517 of 3,871
-    /// members are in mode 3" is the useful diagnostic.
-    CodecUnavailable {
-        /// The member whose stream could not be decoded.
-        member: String,
-        /// The compression mode its stream is in.
-        mode: u8,
-        /// The codec that was offered the stream and declined it.
-        codec: &'static str,
-    },
     /// A compressed stream ended before the member table's promised bytes.
     Truncated {
         /// The member whose stream ran out.
@@ -59,8 +50,7 @@ impl Error {
     pub fn path(&self) -> Option<&Path> {
         match self {
             Error::Format(e) => e.path(),
-            Error::CodecUnavailable { .. } | Error::UnsafeName { .. } => None,
-            Error::Truncated { .. } => None,
+            Error::Truncated { .. } | Error::UnsafeName { .. } => None,
         }
     }
 
@@ -83,9 +73,6 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Error::Format(e) => write!(f, "{e}"),
-            Error::CodecUnavailable { member, mode, codec } => {
-                write!(f, "{member}: mode {mode:#04x} cannot be decoded: {codec}")
-            }
             Error::Truncated { member, at, needed, have } => {
                 let who = if member.is_empty() { "the stream".to_string() } else { member.clone() };
                 write!(f, "{who}: the stream ends at byte {at:#x} - {needed} more bytes were needed, {have} were there")
@@ -118,14 +105,6 @@ mod tests {
         assert_eq!(e.path(), Some(Path::new("db.cbv")));
         assert!(matches!(e.format(), Some(FormatError::Corrupt { .. })));
         assert!(std::error::Error::source(&e).is_some());
-    }
-
-    #[test]
-    fn a_codec_error_names_the_member_and_its_mode() {
-        let e = Error::CodecUnavailable { member: "db.cbh".into(), mode: 3, codec: "no registered codec" };
-        assert_eq!(e.to_string(), "db.cbh: mode 0x03 cannot be decoded: no registered codec");
-        assert_eq!(e.path(), None);
-        assert!(std::error::Error::source(&e).is_none());
     }
 
     #[test]

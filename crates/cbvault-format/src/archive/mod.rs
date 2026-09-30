@@ -20,20 +20,24 @@
 //! names, packed sizes, true sizes and offsets for all 3,871 members of the
 //! reference archive without touching the pool.
 //!
-//! Extraction is partial, and says so. A member stream is decodable when its
-//! compression mode is [`Mode::Stored`], which covers 2,228 of the reference
-//! archive's 3,871 members (57.6 %). The other three modes are **not decoded** —
-//! see [`codec`] for exactly what was tried and what remains open. A member in
-//! an unresolved mode reports [`Error::CodecUnavailable`]; no extraction ever
-//! writes bytes the reader did not decode, and the archive itself is only ever
-//! read.
+//! Extraction is **complete**: all four of the container's block modes are
+//! decoded — stored, LZ, Huffman, and Huffman-then-LZ — so the whole archive
+//! yields bytes, including the `.cbh`, `.cbg`, `.cbj` and `.cba` that carry the
+//! database. See [`codec`] for the scheme and `docs/cbv-reference.md` for the
+//! full field-by-field reference.
+//!
+//! Two rules are never bent. No extraction ever writes bytes the reader did not
+//! decode: a member that fails is reported by name and nothing is written for
+//! it, not even partially. And the archive itself is only ever read.
 //!
 //! # Provenance
 //!
-//! Clean-room, from byte inspection of the owner's local archive and from the
-//! outputs of a separate `uncbv` process. No implementation's source was read.
-//! See `docs/format-spec-cbv.md` for every fact with its evidence, and
-//! `docs/research/00-cbv-facts.md` for the facts pass this module implements.
+//! Clean-room, via the two-room protocol in
+//! `openspec/changes/uncbv-clean-room-parity/`. The container and the codec were
+//! written from the frozen specification `docs/format-spec-uncbv.md` alone; the
+//! implementer had no access to any reference implementation's source, tests or
+//! binary. `docs/research/03-clean-room-audit.md` records the barrier, and
+//! `docs/cbv-reference.md` is the reader-facing reference for the format.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -42,14 +46,16 @@ use crate::des::Des;
 use crate::error::Error as FormatError;
 use crate::file::DbFile;
 
+pub mod blocks;
 pub mod codec;
 pub mod entry;
 pub mod error;
 pub mod huffman;
+pub mod lz;
 
 mod report;
 
-pub use codec::{Codec, Head, Mode, Stored, codec_for, codecs};
+pub use codec::{BLOCK_HEAD, BlockHead, Mode, Report, Scratch};
 pub use entry::{DIRECTORY_OFFSET, ENTRY_SIZE, MAGIC, Member};
 pub use error::{Error, Result};
 pub use report::{Gap, Layout};
@@ -266,53 +272,203 @@ impl Archive {
         read_through(&self.file, self.cipher.as_ref(), member.offset(), len).map_err(Into::into)
     }
 
-    /// Decodes `member` with the first registered codec that handles its mode.
+    /// Decodes `member` into a fresh buffer.
+    ///
+    /// A convenience over [`Archive::decode_into`]; extracting a whole archive
+    /// should use that with one reused buffer instead of a fresh one per member.
     ///
     /// # Errors
     ///
-    /// [`Error::CodecUnavailable`] when the member is in a mode no registered
-    /// codec decodes, which is the case for 1,643 of the reference archive's
-    /// 3,871 members. See [`codec`].
+    /// Reports a typed error naming the member — a truncated block, an unknown
+    /// mode, a malformed Huffman table, an LZ token that runs off its input. No
+    /// partial member is ever returned.
     pub fn decode(&self, member: &Member) -> Result<Vec<u8>> {
-        let stream = self.stream(member)?;
-        let head = Head::parse(&self.path, &stream)?;
-        for codec in codecs() {
-            if codec.handles(head.mode()) {
-                return codec.decode(member, &stream);
-            }
-        }
-        Err(Error::CodecUnavailable {
-            member: member.name().to_owned(),
-            mode: head.mode(),
-            codec: "no registered codec",
-        })
+        let mut out = Vec::new();
+        let mut scratch = Scratch::new();
+        self.decode_into(member, &mut out, &mut scratch)?;
+        Ok(out)
     }
 
-    /// Whether this build can decode `member`, reading only its stream head.
+    /// Decodes `member` into `out`, which is **appended** to, and reports what
+    /// the stream decoded to.
+    ///
+    /// `out` is not cleared, so a caller walking an archive can clear it per
+    /// member and keep one buffer for all 3,871 — which is what makes extraction
+    /// allocation-free after the first member. `scratch` holds the intermediate
+    /// buffers and is likewise reused.
+    ///
+    /// # Errors
+    ///
+    /// A typed error naming the member. Nothing further is appended for the
+    /// offending block, and the bytes already in `out` are left alone so the
+    /// caller can discard them as a unit.
+    pub fn decode_into(&self, member: &Member, out: &mut Vec<u8>, scratch: &mut Scratch) -> Result<Report> {
+        let stream = self.stream(member)?;
+        codec::decode(member, &stream, out, scratch)
+    }
+
+    /// Whether every block of `member`'s stream names a mode this build decodes.
+    ///
+    /// All four are decoded, so this walks the framing and says whether the
+    /// stream is well formed. It never decodes a payload.
     pub fn can_decode(&self, member: &Member) -> Result<bool> {
-        let head = read_through(&self.file, self.cipher.as_ref(), member.offset(), codec::HEAD)?;
-        Ok(Head::parse(&self.path, &head).is_ok_and(|h| codec_for(h.mode()).is_some()))
+        let stream = self.stream(member)?;
+        Ok(codec::all_modes_known(&stream))
+    }
+
+    /// What the archive would yield, without extracting it.
+    ///
+    /// Reports the share of **members** and the share of **bytes** that decode.
+    /// Both, because a large member count of small members is not progress
+    /// toward reading a database: the mode that holds the `.cbh` is 1,517 members
+    /// and 2.3 GB, and a reader that only counted members would call that
+    /// progress.
+    pub fn yield_of(&self) -> Yield {
+        let mut total_bytes = 0u64;
+        let mut decodable_bytes = 0u64;
+        let mut total_members = 0u64;
+        let mut decodable_members = 0u64;
+        let mut unknown: Vec<String> = Vec::new();
+        for m in &self.members {
+            total_members += 1;
+            total_bytes += m.size();
+            match self.can_decode(m) {
+                Ok(true) => {
+                    decodable_members += 1;
+                    decodable_bytes += m.size();
+                }
+                _ => unknown.push(m.name().to_owned()),
+            }
+        }
+        Yield { total_members, decodable_members, total_bytes, decodable_bytes, undecodable: unknown }
     }
 
     /// Decodes every member into `dir`, one file per member, with the archive's
     /// `\` written as the platform's separator.
     ///
-    /// The archive is opened read-only and is never written to.
+    /// One output buffer and one scratch are reused for all members, so the
+    /// whole extraction allocates a bounded number of times rather than once per
+    /// member. The archive is opened read-only and is never written to.
+    ///
+    /// Every member's name is checked **before** any file is written, so an
+    /// archive carrying a name that would escape `dir` leaves nothing behind.
     ///
     /// # Errors
     ///
-    /// Stops at the first member this build cannot decode and reports
-    /// [`Error::CodecUnavailable`], so a partial extraction is never mistaken
-    /// for a complete one. Files already written stay on disk; the error names
-    /// the member that stopped it.
+    /// Stops at the first member that fails to decode and reports it by name, so
+    /// a partial extraction is never mistaken for a complete one. Files already
+    /// written stay on disk; the error names the member that stopped it.
     pub fn extract(&self, dir: impl AsRef<Path>) -> Result<Vec<PathBuf>> {
         let dir = dir.as_ref();
-        let mut written = Vec::with_capacity(self.members.len());
+        // Check every name first: a refused archive must leave nothing behind.
         for member in &self.members {
-            let bytes = self.decode(member)?;
-            written.push(self.write(dir, member, &bytes)?);
+            if member.relative_path().is_none() {
+                return Err(Error::UnsafeName { member: member.name().to_owned() });
+            }
+        }
+        let mut written = Vec::with_capacity(self.members.len());
+        let mut out = Vec::new();
+        let mut scratch = Scratch::new();
+        for member in &self.members {
+            out.clear();
+            scratch.clear();
+            self.decode_into(member, &mut out, &mut scratch)?;
+            written.push(self.write(dir, member, &out)?);
         }
         Ok(written)
+    }
+
+    /// Decodes every member into `dir` in parallel, one file per member, with
+    /// the archive's `\` written as the platform's separator.
+    ///
+    /// This is the fast path, and it is the one that matters at this archive's
+    /// size: 3,871 independent members over 1.7 GB of packed input. Each worker
+    /// gets its own [`Scratch`] and its own output buffer, so nothing is shared
+    /// and nothing is allocated per member; the members are independent by
+    /// construction, which is what makes this safe rather than merely convenient.
+    ///
+    /// Members are ordered largest-first so the long pole starts immediately —
+    /// the `.cbh` is 512 MB and the median member is a 40 KB image, and a
+    /// work-stealing queue handles the rest.
+    ///
+    /// Every member's name is checked **before** any file is written, so an
+    /// archive carrying a name that would escape `dir` leaves nothing behind.
+    ///
+    /// The result is byte-identical to [`Archive::extract`]: same files, same
+    /// contents, same order. This is checked, not asserted.
+    ///
+    /// # Errors
+    ///
+    /// The first member that fails, by name. With several workers in flight some
+    /// later members may already be on disk; the error names the member that
+    /// failed, and the caller can tell a partial extraction from a complete one
+    /// by whether the error is there at all.
+    ///
+    /// # Panics
+    ///
+    /// Never on malformed input: a member that fails to decode is an `Err`, not a
+    /// panic.
+    pub fn extract_parallel(&self, dir: impl AsRef<Path>, threads: usize) -> Result<Vec<PathBuf>> {
+        let dir = dir.as_ref();
+        for member in &self.members {
+            if member.relative_path().is_none() {
+                return Err(Error::UnsafeName { member: member.name().to_owned() });
+            }
+        }
+        let workers = threads.max(1);
+
+        // Largest first: the biggest member dominates the wall clock, so it must
+        // not be the one that starts last.
+        let mut order: Vec<usize> = (0..self.members.len()).collect();
+        order.sort_by_key(|&i| std::cmp::Reverse(self.members[i].size()));
+
+        let next = std::sync::atomic::AtomicUsize::new(0);
+        let failure: std::sync::Mutex<Option<Error>> = std::sync::Mutex::new(None);
+        let results: std::sync::Mutex<Vec<(usize, PathBuf)>> =
+            std::sync::Mutex::new(Vec::with_capacity(self.members.len()));
+
+        std::thread::scope(|scope| {
+            for _ in 0..workers {
+                scope.spawn(|| {
+                    // One buffer and one scratch per worker, reused for every
+                    // member this worker takes.
+                    let mut out = Vec::new();
+                    let mut scratch = Scratch::new();
+                    loop {
+                        let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        let Some(&i) = order.get(i) else { break };
+                        let member = &self.members[i];
+                        out.clear();
+                        scratch.clear();
+                        if let Err(e) = self.decode_into(member, &mut out, &mut scratch) {
+                            let mut slot = failure.lock().expect("the failure slot is never poisoned");
+                            if slot.is_none() {
+                                *slot = Some(e);
+                            }
+                            break;
+                        }
+                        match self.write(dir, member, &out) {
+                            Ok(path) => results.lock().expect("the result slot is never poisoned").push((i, path)),
+                            Err(e) => {
+                                let mut slot = failure.lock().expect("the failure slot is never poisoned");
+                                if slot.is_none() {
+                                    *slot = Some(e);
+                                }
+                                break;
+                            }
+                        }
+                    }
+                });
+            }
+        });
+
+        if let Some(e) = failure.lock().expect("the failure slot is never poisoned").take() {
+            return Err(e);
+        }
+        let mut written = results.into_inner().expect("the result slot is never poisoned");
+        // Restore table order, so the result is the same as `extract`'s.
+        written.sort_by_key(|(i, _)| *i);
+        Ok(written.into_iter().map(|(_, path)| path).collect())
     }
 
     /// Writes `bytes` as `member` under `dir`, creating the folders the
@@ -342,6 +498,50 @@ impl Archive {
 /// The bytes of `bytes` as uppercase hex pairs, for a bad-magic message.
 pub(crate) fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02X}")).collect::<Vec<_>>().join(" ")
+}
+
+/// What an archive would yield if it were extracted, measured without
+/// extracting it.
+///
+/// Both shares are reported, and that is the point: a large member count of
+/// small members is not progress toward reading a database. The mode that holds
+/// a `.cbh` is a handful of members and 2.3 GB of the archive's bytes, and a
+/// reader that reported only "57.6 % of members decodable" would be measuring
+/// the wrong thing.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Yield {
+    /// How many members the table holds.
+    pub total_members: u64,
+    /// How many of them decode.
+    pub decodable_members: u64,
+    /// The members' decoded size in total.
+    pub total_bytes: u64,
+    /// How many of those bytes this build produces.
+    pub decodable_bytes: u64,
+    /// The members that do not decode, by name.
+    ///
+    /// Named rather than counted: a member the reader cannot decode is not
+    /// extracted, and saying which ones is what makes the number actionable.
+    pub undecodable: Vec<String>,
+}
+
+impl Yield {
+    /// The share of members that decode, 0.0 to 1.0, or `None` for an empty
+    /// archive.
+    pub fn member_share(&self) -> Option<f64> {
+        (self.total_members > 0).then(|| self.decodable_members as f64 / self.total_members as f64)
+    }
+
+    /// The share of **bytes** that decode, 0.0 to 1.0, or `None` for an empty
+    /// archive.
+    pub fn byte_share(&self) -> Option<f64> {
+        (self.total_bytes > 0).then(|| self.decodable_bytes as f64 / self.total_bytes as f64)
+    }
+
+    /// Whether every member decodes.
+    pub fn complete(&self) -> bool {
+        self.undecodable.is_empty()
+    }
 }
 
 #[cfg(test)]

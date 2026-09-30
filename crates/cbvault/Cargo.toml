@@ -1,6 +1,6 @@
 [package]
 name = "cbvault"
-description = "Read ChessBase databases as moves2 streams: Database, GameIter, PGN writer, archives"
+description = "Read ChessBase databases as moves2 streams: Database, GameIter, PGN writer, and .cbv/.cbz archives that unarchive in full"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

@@ -1,6 +1,6 @@
 [package]
 name = "cbvault-format"
-description = "Byte-level ChessBase database format: headers, records, codepages and containers"
+description = "Byte-level ChessBase database format: headers, records, codepages, and .cbv/.cbz containers with all four block modes decoded"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
