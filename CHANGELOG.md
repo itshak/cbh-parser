@@ -5,12 +5,11 @@ All notable changes to **cbvault** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-The project is pre-1.0 and **not yet published to crates.io**. The version
-below is the in-tree workspace version, not a release.
+The project is pre-1.0. The version below is the first published release.
 
 ---
 
-## [0.1.0] - unreleased
+## [0.1.0] - 2026-09-30
 
 The first public shape of the library. It is a **work in progress**: the classic
 `.cbh` family is read and exported, `.cbv`/`.cbz` archives unarchive in full, and

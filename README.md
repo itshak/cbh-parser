@@ -145,7 +145,7 @@
 | 2CBH container | **read** | framing proven over 220,418 records |
 | 2CBH `.2cbg` move codec | **not decoded** | yields tags, not `moves2` |
 | Boosters, derived accelerators | **not read** | tolerated and ignored, by design |
-| crates.io release | **not published yet** | see [Installation](#installation) |
+| crates.io release | **published** | v0.1.0; `cargo add cbvault` |
 
 ## Performance
 
@@ -209,14 +209,24 @@ ancestor implementation this was ported from measured 141.5 s on the same machin
 
 ## Installation
 
-**cbvault is not on crates.io yet.** There is no `cargo add cbvault` today, and
-anyone who tells you otherwise is wrong. Until it is published, depend on the
-repository:
+```toml
+[dependencies]
+cbvault = "0.1"
+```
+
+Or, to follow the repository rather than a published version:
 
 ```toml
 [dependencies]
 cbvault = { git = "https://github.com/itshak/cbvault" }
 ```
+
+The `cbvault` crate pulls in `cbvault-format`, `cbvault-chess`, `gigachess` and
+`rayon`. If you only want the byte-level readers — the classic `.cbh` family,
+the 2CBH container, and the `.cbv`/`.cbz` containers — depend on
+`cbvault-format` directly. To build the CLI:
+
+```bash
 
 The `cbvault` crate pulls in `cbvault-format`, `cbvault-chess`, `gigachess` and
 `rayon`. If you only want the byte-level readers, depend on `cbvault-format`
@@ -832,7 +842,7 @@ times** on this database. It now reads into a stack buffer through the new
 - **A game with variations costs one allocation each**, in the decoder's per-game
   variation stack. A database of games without variations allocates nothing per
   game. Fixing it needs a change in `cbvault-chess`.
-- **No fuzzing has been done yet**, and nothing is published to crates.io.
+- **No fuzzing has been done yet.**
 - **The container layout is verified on one archive.** Whether the 173-byte
   member-table stride and the 128-byte name field hold for differently-built `.cbv`
   files is unverified. The reader *derives* the member count from the geometry
