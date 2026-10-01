@@ -810,3 +810,98 @@ fn every_namebase_resolves_all_of_its_matches() {
     assert!(entities.find_teams("Anything").expect("find").is_empty());
     assert!(entities.find_sources("Anything").expect("find").is_empty());
 }
+
+/// Several criteria at once must narrow each other — the requirement is White
+/// **and** an Elo range, not either of them.
+///
+/// The failure this guards is a filter that is built but only partly applied:
+/// `Filter::All` for a criterion the caller could not resolve, say, returns the
+/// whole database for a query the user believed was narrowed. So every test here
+/// asserts a count, not merely that a filter constructs.
+#[test]
+fn criteria_compose_and_each_one_narrows_the_result() {
+    let mut builder = Builder::new();
+    let kasparov = builder.player("Kasparov", "Garry");
+    let kamsky = builder.player("Kamsky", "Boris");
+    builder.player("Short", "Nigel");
+
+    // Four games with different players and ratings, all from the standard start.
+    builder.game(&classic::move_record(
+        0,
+        None,
+        None,
+        &classic::encode(&Board::startpos(), &[Tok::Mv("e2e4")], 0, true),
+    ));
+    let g2 = builder.game(&classic::move_record(
+        0,
+        None,
+        None,
+        &classic::encode(&Board::startpos(), &[Tok::Mv("d2d4")], 0, true),
+    ));
+    g2[0x1f..0x21].copy_from_slice(&2800u16.to_be_bytes()); // white elo
+    g2[0x0c..0x0f].copy_from_slice(&[0, 0, kamsky as u8]);
+    let g3 = builder.game(&classic::move_record(
+        0,
+        None,
+        None,
+        &classic::encode(&Board::startpos(), &[Tok::Mv("c2c4")], 0, true),
+    ));
+    g3[0x1f..0x21].copy_from_slice(&2600u16.to_be_bytes());
+    g3[0x09..0x0c].copy_from_slice(&[0, 0, kasparov as u8]);
+    let g4 = builder.game(&classic::move_record(
+        0,
+        None,
+        None,
+        &classic::encode(&Board::startpos(), &[Tok::Mv("g1f3")], 0, true),
+    ));
+    g4[0x1f..0x21].copy_from_slice(&2900u16.to_be_bytes());
+    g4[0x09..0x0c].copy_from_slice(&[0, 0, kasparov as u8]);
+
+    let db = builder.write("criteria-compose");
+    let database = Database::open(db.base()).expect("open");
+    let entities = database.entities();
+
+    let ids = entities.find_players("Kasparov").expect("find");
+    assert_eq!(ids, vec![kasparov], "one Kasparov in this fixture");
+
+    // The acceptance case: a player AND a rating range.
+    let both = AllOf::new().and(any_player(&ids)).and(Filter::WhiteEloBetween(Range::at_least(2800))).filter();
+    let hits = scan(&database, &both, 4).expect("scan");
+    assert_eq!(hits.len(), 1, "Kasparov at 2900; Kasparov at 2600 is below the bound");
+
+    // Each criterion alone is wider, which is what proves the conjunction did the
+    // narrowing rather than one of them doing all of it.
+    let player_only = AllOf::new().and(any_player(&ids)).filter();
+    assert_eq!(scan(&database, &player_only, 4).expect("scan").len(), 2, "both Kasparov games");
+    let elo_only = AllOf::new().and(Filter::WhiteEloBetween(Range::at_least(2800))).filter();
+    assert!(scan(&database, &elo_only, 4).expect("scan").len() >= 2, "the high-rated games");
+
+    // An empty conjunction is "everything", not "nothing": clearing a search form
+    // must not turn into a zero-result query.
+    assert_eq!(AllOf::new().filter(), Filter::All);
+    assert_eq!(scan(&database, &AllOf::new().filter(), 4).expect("scan").len(), 4);
+
+    // An absent name matches nothing, which is the opposite of an empty filter.
+    let nobody = entities.find_players("Nobody").expect("find");
+    assert!(nobody.is_empty());
+    let missing = AllOf::new().and(any_player(&nobody)).filter();
+    assert_eq!(scan(&database, &missing, 4).expect("scan").len(), 0, "a misspelt name finds nothing");
+}
+
+/// The result must not depend on how many workers ran it, or a position or a game
+/// would appear or vanish with the machine's core count.
+#[test]
+fn a_scan_gives_the_same_answer_at_every_thread_count() {
+    let db = fixture("scan-threads", 5000);
+    let database = Database::open(db.base()).expect("open");
+    let filter = AllOf::new()
+        .and(Filter::EloBetween(Range::at_least(2000)))
+        .and(Filter::Result(cbvault_format::game::GameResult::WhiteWins))
+        .filter();
+
+    let one = scan(&database, &filter, 1).expect("scan").ids();
+    for threads in [2, 4, 8] {
+        let many = scan(&database, &filter, threads).expect("scan").ids();
+        assert_eq!(many, one, "{threads} workers must agree with one");
+    }
+}

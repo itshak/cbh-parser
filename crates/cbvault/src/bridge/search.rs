@@ -25,6 +25,88 @@ use rayon::prelude::*;
 use super::namebase::Name;
 use super::{Database, GameBuf};
 
+/// Games where either player is one of `ids`.
+///
+/// The companion to [`Entities::find_players`](crate::bridge::Entities::find_players):
+/// that returns every id a surname names, and this turns the set into one filter,
+/// so a common surname gets all its players' games rather than one player's.
+///
+/// An **empty** `ids` matches nothing, not everything. The distinction is the
+/// whole point — a name the database does not hold must produce zero games, and a
+/// filter that matched everything would answer a mistyped name with the entire
+/// database. This is why it is a named function rather than the caller folding
+/// `Filter::AnyOf` itself, where an empty fold is easy to get backwards.
+pub fn any_player(ids: &[u32]) -> Filter {
+    if ids.is_empty() {
+        // No ids means no player matches, and `Filter::All` here would answer a
+        // misspelt name with the entire database. An unsatisfiable predicate is
+        // the only safe reading of "these ids" when there are none.
+        return Filter::Not(Box::new(Filter::All));
+    }
+    let mut iter = ids.iter();
+    let first = Filter::Either(*iter.next().expect("non-empty"));
+    iter.fold(first, |acc, id| Filter::AnyOf(Box::new(acc), Box::new(Filter::Either(*id))))
+}
+
+/// A conjunction of criteria, built once and reused.
+///
+/// This is the piece that makes "white player AND Elo range" one question rather
+/// than two, and it is a fold so a caller adds criteria in whatever order its own
+/// criteria type happens to carry them:
+///
+/// ```ignore
+/// let filter = AllOf::new()
+///     .and(Filter::WhiteEloBetween(Range::at_least(2800)))
+///     .and(Filter::YearBetween(Range::new(2000, 2010)))
+///     .and(Filter::player(white_id))
+///     .filter();
+/// ```
+///
+/// An empty conjunction is `Filter::All`, not a filter that matches nothing —
+/// "no criteria" means "every game", and a builder that returned an empty
+/// conjunction as unsatisfiable would turn a user clearing the search form into a
+/// zero-result query.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct AllOf(Filter);
+
+impl AllOf {
+    /// An empty conjunction.
+    pub fn new() -> AllOf {
+        AllOf(Filter::All)
+    }
+
+    /// Adds one criterion.
+    #[must_use]
+    pub fn and(mut self, filter: Filter) -> AllOf {
+        self.0 = match std::mem::take(&mut self.0) {
+            Filter::All => filter,
+            existing => Filter::AllOf(Box::new(existing), Box::new(filter)),
+        };
+        self
+    }
+
+    /// Adds a criterion only if it is present, for a consumer whose criteria are
+    /// all optional.
+    #[must_use]
+    pub fn and_opt(self, filter: Option<Filter>) -> AllOf {
+        match filter {
+            Some(f) => self.and(f),
+            None => self,
+        }
+    }
+
+    /// The conjunction, ready for [`scan`].
+    pub fn filter(self) -> Filter {
+        self.0
+    }
+}
+
+impl From<AllOf> for Filter {
+    fn from(all: AllOf) -> Filter {
+        all.0
+    }
+}
+
 /// A set of game ids, for "these games and no others".
 ///
 /// A sorted vector with a binary search, so a filter over it costs a

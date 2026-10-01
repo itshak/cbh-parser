@@ -99,6 +99,35 @@ pub trait GameSink {
     fn failed(&mut self, _id: u32, _error: &Error) {}
 }
 
+impl GameRef<'_> {
+    /// The game's exact ply count — one per move played.
+    ///
+    /// `moves.len()` already answers this, and a caller may well write that.
+    /// This exists because the number is easy to get subtly wrong: the header's
+    /// `move_count()` is a `u8` capped at 255 counting **moves**, not plies, so
+    /// `2 * header.move_count()` is the right answer only for a game from the
+    /// standard start with no castling bookkeeping — it is wrong for a game with
+    /// a set-up start, and silently so.
+    ///
+    /// A consumer filtering `ply_count_from`/`ply_count_to` wants this, and wants
+    /// it from the move stream the walk has already read, not from the header.
+    /// Free: the walk knows the length.
+    #[inline]
+    pub fn plies(&self) -> usize {
+        self.moves.len()
+    }
+
+    /// Whether the walk was asked for this game's keys.
+    ///
+    /// A game with no keys is not a game with no positions — it is a game whose
+    /// sink did not ask, so `plies` and the key count cannot be derived from each
+    /// other without this.
+    #[inline]
+    pub fn has_keys(&self) -> bool {
+        !self.keys.is_empty()
+    }
+}
+
 impl std::fmt::Debug for GameRef<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("GameRef")
