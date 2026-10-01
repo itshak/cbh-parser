@@ -389,6 +389,7 @@ fn write_tags<H: Head>(
     entities: &Entities,
     start: &Start,
     board: &Board,
+    total_plies: u32,
     names: &mut Names,
 ) -> Result<()> {
     let id = |v: i64| -> Option<u32> { (v >= 0).then_some(v as u32) };
@@ -428,6 +429,9 @@ fn write_tags<H: Head>(
     }
     if black_elo > 0 {
         push_number_tag(out, "[BlackElo \"", black_elo as u32);
+    }
+    if total_plies == 0 {
+        push_tag(out, "[PlyCount \"", "0");
     }
     if *start != Start::Standard {
         if matches!(start, Start::Chess960(_)) || matches!(start, Start::Setup(s) if s.chess960) {
@@ -689,8 +693,9 @@ impl PgnWriter {
         // buffer, written with one `write_all`: two buffers meant two calls
         // into the sink per game, eleven million times over.
         self.game.clear();
-        write_tags(&mut self.game, header, entities, &start, &board, &mut self.names).map_err(as_io)?;
         let stats = walk_from(what, game, &start, &mut self.tree).map_err(as_io)?;
+        write_tags(&mut self.game, header, entities, &start, &board, stats.total_plies, &mut self.names)
+            .map_err(as_io)?;
         // An annotation record with no items writes nothing anywhere: no game
         // comment, no note before or after a move, no `[%evp]`. Treating it as
         // no annotations at all takes the movetext's direct path, which is the

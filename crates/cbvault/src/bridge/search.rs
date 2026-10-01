@@ -31,21 +31,17 @@ use super::{Database, GameBuf};
 /// that returns every id a surname names, and this turns the set into one filter,
 /// so a common surname gets all its players' games rather than one player's.
 ///
-/// An **empty** `ids` matches nothing, not everything. The distinction is the
-/// whole point — a name the database does not hold must produce zero games, and a
-/// filter that matched everything would answer a mistyped name with the entire
-/// database. This is why it is a named function rather than the caller folding
-/// `Filter::AnyOf` itself, where an empty fold is easy to get backwards.
+/// Games where either player is one of `ids`.
+///
+/// The companion to [`Entities::find_players`](crate::bridge::Entities::find_players):
+/// that returns every id a surname names, and this turns the set into one filter,
+/// so a common surname gets all its players' games rather than one player's.
+///
+/// Evaluated via binary search over an [`IdSet`] in $O(\log N)$ time with no
+/// heap allocations or recursive stack frames during header matching. An
+/// **empty** `ids` matches nothing, not everything.
 pub fn any_player(ids: &[u32]) -> Filter {
-    if ids.is_empty() {
-        // No ids means no player matches, and `Filter::All` here would answer a
-        // misspelt name with the entire database. An unsatisfiable predicate is
-        // the only safe reading of "these ids" when there are none.
-        return Filter::Not(Box::new(Filter::All));
-    }
-    let mut iter = ids.iter();
-    let first = Filter::Either(*iter.next().expect("non-empty"));
-    iter.fold(first, |acc, id| Filter::AnyOf(Box::new(acc), Box::new(Filter::Either(*id))))
+    Filter::PlayerSet(IdSet::from_ids(ids.iter().copied()))
 }
 
 /// A conjunction of criteria, built once and reused.
@@ -280,6 +276,12 @@ pub enum Filter {
     Opponent(u32),
     /// Games where either player is this entity id.
     Either(u32),
+    /// Games where either player is one of these entity ids.
+    PlayerSet(IdSet),
+    /// Games whose white player is one of these entity ids.
+    WhiteSet(IdSet),
+    /// Games whose black player is one of these entity ids.
+    BlackSet(IdSet),
     /// Games in this tournament's entity id.
     Tournament(u32),
     /// Games whose annotator is this entity id.
@@ -301,6 +303,21 @@ impl Filter {
     /// with [`crate::bridge::Entities::find_player`] and build the filter from the id.
     pub fn player(id: u32) -> Filter {
         Filter::Either(id)
+    }
+
+    /// Games where either player is one of `ids`.
+    pub fn player_set(ids: IdSet) -> Filter {
+        Filter::PlayerSet(ids)
+    }
+
+    /// Games whose white player is one of `ids`.
+    pub fn white_set(ids: IdSet) -> Filter {
+        Filter::WhiteSet(ids)
+    }
+
+    /// Games whose black player is one of `ids`.
+    pub fn black_set(ids: IdSet) -> Filter {
+        Filter::BlackSet(ids)
     }
 
     /// Games whose ECO code is the `code` part of a text like `"B20"`, with every
@@ -355,6 +372,9 @@ impl Filter {
             Filter::Player(id) => header.white() == *id,
             Filter::Opponent(id) => header.black() == *id,
             Filter::Either(id) => header.white() == *id || header.black() == *id,
+            Filter::PlayerSet(ids) => ids.contains(header.white()) || ids.contains(header.black()),
+            Filter::WhiteSet(ids) => ids.contains(header.white()),
+            Filter::BlackSet(ids) => ids.contains(header.black()),
             Filter::Tournament(id) => header.tournament() == *id,
             Filter::Annotator(id) => header.annotator() == *id,
             Filter::Source(id) => header.source() == *id,
@@ -832,5 +852,73 @@ mod tests {
         assert!(!Range { from: None, to: None }.contains(0));
         // Inverted ranges match nothing.
         assert!(!Range::new(2010, 2000).contains(2005));
+    }
+
+    fn mock_header(white: u32, black: u32) -> GameHeader {
+        let mut b = [0u8; cbvault_format::cbh::RECORD_SIZE];
+        b[0] = 1; // Game
+        b[0x09] = (white >> 16) as u8;
+        b[0x0a] = (white >> 8) as u8;
+        b[0x0b] = white as u8;
+        b[0x0c] = (black >> 16) as u8;
+        b[0x0d] = (black >> 8) as u8;
+        b[0x0e] = black as u8;
+        GameHeader::from_bytes(1, &b)
+    }
+
+    #[test]
+    fn any_player_empty_matches_nothing() {
+        let f = any_player(&[]);
+        assert!(!f.matches(1, &mock_header(1, 2)));
+        assert!(!f.matches(1, &mock_header(0, 0)));
+    }
+
+    #[test]
+    fn any_player_matches_identically_to_fold_and_handles_large_sets() {
+        let legacy_fold = |ids: &[u32]| -> Filter {
+            if ids.is_empty() {
+                return Filter::Not(Box::new(Filter::All));
+            }
+            let mut iter = ids.iter();
+            let first = Filter::Either(*iter.next().expect("non-empty"));
+            iter.fold(first, |acc, id| Filter::AnyOf(Box::new(acc), Box::new(Filter::Either(*id))))
+        };
+
+        // 1 player
+        let ids_1 = [42];
+        let f1 = any_player(&ids_1);
+        let fold1 = legacy_fold(&ids_1);
+        for (w, b) in [(42, 1), (1, 42), (42, 42), (99, 100)] {
+            let h = mock_header(w, b);
+            assert_eq!(f1.matches(1, &h), fold1.matches(1, &h));
+        }
+
+        // 2 players
+        let ids_2 = [10, 20];
+        let f2 = any_player(&ids_2);
+        let fold2 = legacy_fold(&ids_2);
+        for (w, b) in [(10, 1), (1, 20), (20, 10), (30, 40)] {
+            let h = mock_header(w, b);
+            assert_eq!(f2.matches(1, &h), fold2.matches(1, &h));
+        }
+
+        // 100 players: executes without stack overflow or recursion
+        let ids_100: Vec<u32> = (1..=100).collect();
+        let f100 = any_player(&ids_100);
+        let fold100 = legacy_fold(&ids_100);
+        for id in [1, 50, 100, 101, 500] {
+            let h_white = mock_header(id, 9999);
+            let h_black = mock_header(9999, id);
+            assert_eq!(f100.matches(1, &h_white), fold100.matches(1, &h_white));
+            assert_eq!(f100.matches(1, &h_black), fold100.matches(1, &h_black));
+        }
+
+        // Directional sets
+        let white_set = Filter::white_set(IdSet::from_ids([10, 20]));
+        let black_set = Filter::black_set(IdSet::from_ids([10, 20]));
+        assert!(white_set.matches(1, &mock_header(10, 99)));
+        assert!(!white_set.matches(1, &mock_header(99, 10)));
+        assert!(black_set.matches(1, &mock_header(99, 20)));
+        assert!(!black_set.matches(1, &mock_header(20, 99)));
     }
 }

@@ -234,6 +234,11 @@ impl GameBuf {
         self.want_keys
     }
 
+    /// Scratch buffer for reading annotations, kept across games.
+    pub(crate) fn annotation_scratch(&mut self) -> &mut Vec<u8> {
+        &mut self.annotation
+    }
+
     /// Empties the buffer, keeping its memory: the decoded line, the keys, the
     /// names and the FEN of the last game.
     pub fn clear(&mut self) {

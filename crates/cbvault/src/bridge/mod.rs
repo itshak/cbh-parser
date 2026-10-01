@@ -279,6 +279,8 @@ pub struct Database {
     moves: std::sync::OnceLock<DbFile>,
     /// The annotation file, opened on the first request for annotations.
     annotations: std::sync::OnceLock<Annotations>,
+    /// The format crate's entity tables, opened on the first request for PGN formatting.
+    format_entities: std::sync::OnceLock<cbvault_format::cbh::Entities>,
 }
 
 impl Database {
@@ -356,6 +358,7 @@ impl Database {
             flags,
             moves: std::sync::OnceLock::new(),
             annotations: std::sync::OnceLock::new(),
+            format_entities: std::sync::OnceLock::new(),
         })
     }
 
@@ -427,6 +430,15 @@ impl Database {
         }
         let file = Annotations::open(&self.base)?;
         Ok(self.annotations.get_or_init(|| file))
+    }
+
+    /// The format crate's entity tables, opened on the first request for PGN formatting.
+    pub(crate) fn format_entities(&self) -> Result<&cbvault_format::cbh::Entities> {
+        if let Some(entities) = self.format_entities.get() {
+            return Ok(entities);
+        }
+        let entities = cbvault_format::cbh::Entities::open(&self.base)?;
+        Ok(self.format_entities.get_or_init(|| entities))
     }
 }
 
@@ -832,6 +844,39 @@ impl Database {
         buf.walk(id, at, &game)?;
         walk::resolve_names(&header, &self.entities, buf)?;
         buf.view(id, header, self, want_annotations)
+    }
+
+    /// Exports game `id` as a PGN string, using `buf`'s annotation preference.
+    pub fn game_pgn(&self, id: u32, buf: &mut GameBuf) -> Result<String> {
+        self.game_pgn_with(id, buf, buf.wants_annotations())
+    }
+
+    /// Exports game `id` as a complete PGN string: tags, movetext, and annotations
+    /// when `want_annotations` is true.
+    ///
+    /// Formats both standard games with moves and historical move-less (score-only)
+    /// games cleanly (emitting `[PlyCount "0"]` and the terminal result).
+    pub fn game_pgn_with(&self, id: u32, buf: &mut GameBuf, want_annotations: bool) -> Result<String> {
+        let header = self.header_ref(id)?;
+        if !matches!(header.kind(), RecordKind::Game) {
+            return Err(Error::corrupt(self.base(), u64::from(id), format!("record {id} is not a game")));
+        }
+        let at = self.move_offset(&header)?;
+        let mut record = Vec::new();
+        let bytes = convert::move_record(self.moves()?, at, &mut record)?;
+        let game = GameMoves::parse(&self.members.moves, bytes)?;
+        let anns = if want_annotations && header.annotations_offset() != 0 {
+            Some(self.annotations()?.of_ref(&header, self.wide(), buf.annotation_scratch())?)
+        } else {
+            None
+        };
+        let entities = self.format_entities()?;
+        let mut writer = crate::pgn::PgnWriter::new();
+        let mut out = Vec::new();
+        writer
+            .write_game(&mut out, &header, entities, &game, anns.as_ref())
+            .map_err(|e| Error::corrupt(self.base(), u64::from(id), e.to_string()))?;
+        String::from_utf8(out).map_err(|e| Error::corrupt(self.base(), u64::from(id), e.to_string()))
     }
 
     /// The records `first..=last` as one batch, borrowed from the map where the file

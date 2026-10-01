@@ -52,6 +52,11 @@ their header magic; both are read through the same model.
 - Flags: bit 0 game, bit 1 guiding text; records are byte-ordered by id; guiding texts
   share the id space with games `[NB]` `[FN]`.
 - Deleted games occur (flag/metadata bit) and must decode without error `[SRC]`.
+- **Score-only historical games**: Games with `move_count == 0` (and non-stub headers pointing to a
+  minimal `.cbg` record, e.g. the 5-byte `00 00 00 05 0c` EOF stub) represent valid historical
+  records where only the score and metadata are preserved (e.g. Staunton–Hughes 1858). In Mega
+  Database 2025, ~9.5% (approx 140,000 games) are score-only. These records decode with 0 plies
+  and export to PGN with `[PlyCount "0"]` and the terminal result token.
 
 ### 2.2 Move records, `.cbg`
 
@@ -62,6 +67,8 @@ their header magic; both are read through the same model.
   king/rook squares (8 bytes) `[SRC]`.
 - Move streams are addressed by `.cbh` offsets; a naive chain scan stops at rewritten
   records' holes (≈512-byte holes after shortened records) `[NB]`.
+- Move streams with zero moves (e.g. the 5-byte `MODE_0` stub where `0x0c` decodes to `0xff` End-Of-Line)
+  terminate cleanly, producing a zero-ply game without error.
 
 ### 2.3 Annotations, `.cba`
 

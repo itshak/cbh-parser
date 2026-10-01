@@ -70,6 +70,31 @@ fn a_standard_game_writes_the_golden_pgn() {
 }
 
 #[test]
+fn a_zero_ply_game_writes_valid_pgn() {
+    let board = gigachess::Board::startpos();
+    let mut b = Builder::new();
+    let toks = [Tok::End];
+    b.game(&classic::move_record(0, None, None, &classic::encode(&board, &toks, 0, false)));
+    let db = b.write("pgn-zero-ply");
+
+    let pgn = export(&db, 1);
+    let want = "\
+[Event \"Paris\"]
+[Site \"?\"]
+[Date \"????.??.??\"]
+[Round \"?\"]
+[White \"Morphy\"]
+[Black \"Anderssen\"]
+[Result \"1-0\"]
+[PlyCount \"0\"]
+
+1-0
+
+";
+    assert_eq!(pgn, want);
+}
+
+#[test]
 fn variations_are_written_in_parentheses() {
     let board = gigachess::Board::startpos();
     let toks = [

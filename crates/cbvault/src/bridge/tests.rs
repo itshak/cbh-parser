@@ -527,6 +527,52 @@ fn an_annotated_game_lands_where_the_pgn_writer_puts_it() {
     assert!(matches!(item.annotation, cbvault_format::game::annotations::Annotation::Text { .. }));
 }
 
+#[test]
+fn database_game_pgn_exports_standard_and_zero_ply_games() {
+    let board = gigachess::Board::startpos();
+    let mut b = Builder::new();
+    let p1 = b.player("Staunton", "Howard");
+    let p2 = b.player("Hughes", "ME");
+    let t1 = b.tournament("Birmingham", "ENG");
+    // Game 1: with moves
+    let toks = [Tok::Mv("e2e4"), Tok::End];
+    let stream = classic::encode(&board, &toks, 0, false);
+    let record = classic::move_record(0, None, None, &stream);
+    let h1 = b.game(&record);
+    h1[0x09..0x0c].copy_from_slice(&p1.to_be_bytes()[1..]);
+    h1[0x0c..0x0f].copy_from_slice(&p2.to_be_bytes()[1..]);
+    h1[0x0f..0x12].copy_from_slice(&t1.to_be_bytes()[1..]);
+
+    // Game 2: zero moves
+    let empty_toks = [Tok::End];
+    let empty_stream = classic::encode(&board, &empty_toks, 0, false);
+    let empty_record = classic::move_record(0, None, None, &empty_stream);
+    let h2 = b.game(&empty_record);
+    h2[0x09..0x0c].copy_from_slice(&p1.to_be_bytes()[1..]);
+    h2[0x0c..0x0f].copy_from_slice(&p2.to_be_bytes()[1..]);
+    h2[0x0f..0x12].copy_from_slice(&t1.to_be_bytes()[1..]);
+
+    let db = b.write("bridge-game-pgn");
+    let database = Database::open(db.base()).expect("open");
+    let mut buf = GameBuf::new();
+
+    // Game 1 with moves
+    let pgn1 = database.game_pgn(1, &mut buf).expect("pgn 1");
+    assert!(pgn1.contains("[White \"Staunton, Howard\"]"));
+    assert!(pgn1.contains("[Black \"Hughes, ME.\"]"));
+    assert!(pgn1.contains("[Event \"Birmingham\"]"));
+    assert!(pgn1.contains("1. e4 1-0"));
+    assert!(!pgn1.contains("[PlyCount"));
+
+    // Game 2 zero moves
+    let pgn2 = database.game_pgn(2, &mut buf).expect("pgn 2");
+    assert!(pgn2.contains("[White \"Staunton, Howard\"]"));
+    assert!(pgn2.contains("[Black \"Hughes, ME.\"]"));
+    assert!(pgn2.contains("[Event \"Birmingham\"]"));
+    assert!(pgn2.contains("[PlyCount \"0\"]"));
+    assert!(pgn2.ends_with("\n\n1-0\n\n"));
+}
+
 /// A fixture whose namebases are re-written as sorted trees, because the
 /// in-repo fixture builder writes no tree at all: every record's two child
 /// indexes are -1, so a tree descent can only ever reach record 0.

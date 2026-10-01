@@ -145,6 +145,10 @@ impl GameHeader {
     }
 
     /// Number of moves in the main line, capped at 255.
+    ///
+    /// Note that `move_count == 0` occurs in valid historical score-only games (where only
+    /// metadata and the game result were preserved, e.g. Staunton–Hughes 1858); these are
+    /// sound games with 0 plies, not corrupt records.
     pub fn move_count(&self) -> u8 {
         self.b[0x2d]
     }

@@ -256,3 +256,20 @@ fn the_consumer_own_replay_accepts_what_the_walk_hands_out() {
     }
     assert!(refused.is_empty(), "the consumer's own replay disagreed on {} of {} games", refused.len(), agreed);
 }
+
+#[test]
+fn move_less_historical_record_3855_exports_valid_score_only_pgn() {
+    let base = set_or_skip!();
+    let db = Database::open(base).expect("the reference set opens");
+    let mut buf = GameBuf::new();
+    let pgn = db.game_pgn(3855, &mut buf).expect("record 3855 exports PGN");
+    assert!(pgn.contains("[Event \"British CA-02 International Masters\"]"));
+    assert!(pgn.contains("[Site \"Birmingham\"]"));
+    assert!(pgn.contains("[Date \"1858.08.24\"]"));
+    assert!(pgn.contains("[Round \"1.1\"]"));
+    assert!(pgn.contains("[White \"Staunton, Howard\"]"));
+    assert!(pgn.contains("[Black \"Hughes, ME.\"]"));
+    assert!(pgn.contains("[Result \"1-0\"]"));
+    assert!(pgn.contains("[PlyCount \"0\"]"));
+    assert!(pgn.ends_with("\n\n1-0\n\n"));
+}
