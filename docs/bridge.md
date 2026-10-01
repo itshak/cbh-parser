@@ -302,6 +302,25 @@ next call with the same buffer. The moves it yields are exactly the ones
 `for_each_game` hands a sink for the same id — asserted over a whole fixture —
 so a game view and a conversion cannot disagree.
 
+### Extract game as PGN
+
+```rust
+let pgn = db.game_pgn(1)?;
+// Or with a reusable buffer to avoid allocations across hot loops:
+let mut buf = GameBuf::new();
+let pgn = db.game_pgn_with(1, &mut buf, true)?;
+```
+
+`game_pgn` renders the complete game as standard PGN text, including all Seven Tag Roster
+headers (`[Event ...]`, `[Site ...]`, `[Date ...]`, `[Round ...]`, `[White ...]`,
+`[Black ...]`, `[Result ...]`), additional metadata (`[WhiteElo ...]`, `[BlackElo ...]`,
+`[ECO ...]`, `[PlyCount ...]`), and movetext with NAG annotations and sub-variations.
+
+#### Score-only (0-ply) game contract
+Games with empty movetext (where `header.move_count() == 0`, e.g., Staunton–Hughes 1858)
+are rendered with `[PlyCount "0"]` and termination result only. No fake moves are synthesized,
+and headers are preserved completely. This matches ChessBase's official PGN export.
+
 ## Tag search
 
 A name resolves to one entity id, once, and the scan compares that id per
@@ -322,7 +341,10 @@ for m in found.matches() {
   see which.
 - `Filter` is the resolved form: `All`, `WhiteEloAtLeast`, `BlackEloAtLeast`,
   `EloAtLeast`, `Player`, `Opponent`, `Either`, `Tournament`, `Annotator`,
-  `Source`, `Ids`, and `and` / `or` / `not`.
+  `Source`, `Ids`, `PlayerSet`, and `and` / `or` / `not`.
+- `Filter::player_set(&[u32])` wraps an `IdSet` (sorted unique list) and matches
+  against white/black IDs using $O(\log K)$ binary search with zero allocations per game,
+  allowing multi-ID surname queries (e.g. all Kasparov entries) to execute at native scan speed.
 - `scan(db, filter, threads)` and `scan_range(db, first, last, filter, threads)`
   return a `Scan` of `Match`es in ascending game order. The same predicate over
   the same range yields the same set at any thread count — asserted at 1, 2, 5
@@ -353,11 +375,24 @@ per record, so the fallback is not on the scan's path.
 
 Two answers, and cbvault does not define an index format for either.
 
-**With the consumer's own index.** A keyed conversion emits the keys; the
-consumer's sidecar maps each to `(game_id, ply)`. That is the design's chosen
-answer, and the one a converted reference base should use.
+### 1. Dual-Pathway Position Indexing
 
-**Without one.** `for_each_position_key` replays the source and tests positions
+cbvault is designed to support **two distinct position index construction pathways**:
+
+- **Pathway A: Simultaneous Build during Stream Loading / Conversion**
+  When importing or converting `.cbh` games (e.g. to `.bbrb` or another store), the sink
+  returns `wants_keys() -> true`. The reader computes Polyglot Zobrist keys incrementally
+  via `gigachess::play_hashed` during decoding and delivers them in `game.keys`. The consumer
+  streams `(hash, game_id)` records directly into index shard buffers concurrently with
+  writing game rows. This eliminates the need for a second 11M-game pass over disk.
+- **Pathway B: Separate On-Demand Build after Loading**
+  For a live reference connected without an index, the consumer can run an asynchronous
+  background build at any time via `convert_parallel` / `walk_games_indexing` with an
+  index sink. The database remains fully usable and searchable during the build.
+
+### 2. Live Scan Replay (Without an Index)
+
+`for_each_position_key` replays the source and tests positions
 as it goes, in parallel, and reports where the position is:
 
 ```rust
@@ -374,7 +409,7 @@ on this machine) and `PositionSearch::complete` is `false` — a cancelled run's
 hits are a prefix of the answer, never the whole of it.
 
 Measured at **19.9 M main-line plies/s on one thread** and 109.6 M/s on ten,
-against a 15 M/s budget.
+against a 15 M/s budget (5.1–5.8s for full 11.1M-game position scan).
 
 ## What cbvault does not do
 
