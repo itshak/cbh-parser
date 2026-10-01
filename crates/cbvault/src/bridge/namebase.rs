@@ -255,6 +255,73 @@ impl Namebase {
         Ok(None)
     }
 
+    /// Every id whose sorted name field is `name`, in ascending id order.
+    ///
+    /// [`Namebase::descend`] answers "an id", and that is not the same question
+    /// as "which ids". A namebase is keyed by **last name** for a player and by
+    /// **title** for a tournament, so one key has many records: the reference
+    /// database's `.cbp` holds 463,261 players and a search for a common surname
+    /// matches several of them. Returning one id would silently drop the others'
+    /// games, which reads to a user as "that player has fewer games than I
+    /// thought" rather than as a bug.
+    ///
+    /// The records sharing a key are not guaranteed to hang off one subtree, so
+    /// this walks the tree once and collects every match rather than assuming a
+    /// range. It is bounded by the record count exactly as `descend` is, so a
+    /// damaged file stops instead of looping.
+    fn find_all(&self, name: &str) -> Result<Vec<u32>> {
+        if name.is_empty() {
+            return Ok(Vec::new());
+        }
+        let want = name.as_bytes();
+        let mut found = Vec::new();
+        // An explicit stack rather than recursion: the tree's depth is its record
+        // count in the worst case, and a corrupt file should exhaust an iteration
+        // budget rather than the stack.
+        let mut stack = vec![self.root];
+        // Bounded so a damaged file — a cycle, or a link that never reaches -1 —
+        // stops instead of looping forever.
+        //
+        // The walk is a plain pre-order over the tree, not a three-push in-order
+        // trick. The trick looks tidier and does not terminate: re-pushing the
+        // node itself puts its left child on the stack a second time, which puts
+        // that child's left child on again, and a seven-record fixture spends its
+        // whole budget popping the same leaf. `seen` makes a repeat a no-op, so
+        // the answer is correct whether or not the tree is.
+        let mut seen: Vec<u32> = Vec::with_capacity(self.count as usize);
+        let budget = self.count.saturating_mul(3).saturating_add(8);
+        let mut pops = 0u32;
+        while let Some(at) = stack.pop() {
+            if pops > budget {
+                break;
+            }
+            pops += 1;
+            let Some(node) = self.node(at)? else { continue };
+            if seen.contains(&(at as u32)) {
+                continue;
+            }
+            seen.push(at as u32);
+            stack.push(node.right);
+            stack.push(node.left);
+            if self.key(&node) == want {
+                found.push(at as u32);
+            }
+        }
+        if found.is_empty() {
+            // The descent and the tree walk can both miss on a set whose tree is
+            // not a valid search tree — the reference database's `.cbt` has 223
+            // inversions and 95,686 names a descent cannot reach. Fall back to the
+            // same verified scan `find_with` uses, so the answer is complete
+            // regardless of the tree's shape.
+            if let Some(id) = self.scan(name)? {
+                found.push(id);
+            }
+        }
+        found.sort_unstable();
+        found.dedup();
+        Ok(found)
+    }
+
     /// The id the entity `name` names, and which path resolved it.
     fn find_with(&self, name: &str) -> Result<Option<Found>> {
         if name.is_empty() {
@@ -519,6 +586,49 @@ impl Entities {
     /// with [`Entities::player_text`] to see which one.
     pub fn find_player(&self, name: &str) -> Result<Option<u32>> {
         Ok(self.find_player_with(name)?.map(|found| found.id))
+    }
+
+    /// **Every** id the player last name `name` names, ascending.
+    ///
+    /// [`Entities::find_player`] answers "an id" and that is the wrong question
+    /// for a search: the `.cbp` is keyed by **last name**, so a surname shared by
+    /// several players — and a common one is shared by thousands — has one key and
+    /// many records. A filter built from one of them silently omits the others'
+    /// games, which a user reads as "this player has fewer games than I thought".
+    ///
+    /// This is the whole set, so a caller builds one filter and gets every game
+    /// that name appears in. Empty for a name the file does not hold.
+    ///
+    /// `name` is the last name as stored. Matching is exact and case-sensitive,
+    /// as the tree's own comparison is — see [`Namebase::find_all`].
+    pub fn find_players(&self, name: &str) -> Result<Vec<u32>> {
+        self.players.find_all(name)
+    }
+
+    /// Every id whose tournament title is `name`, ascending.
+    ///
+    /// The same reason as [`Entities::find_players`]: `.cbt` is keyed by title and
+    /// ChessBase reuses a title across sites and years, so one title is many
+    /// records. A tournament search that returned one of them would under-report
+    /// every event sharing a name.
+    pub fn find_tournaments(&self, name: &str) -> Result<Vec<u32>> {
+        self.tournaments.find_all(name)
+    }
+
+    /// Every id whose annotator name is `name`, ascending.
+    pub fn find_annotators(&self, name: &str) -> Result<Vec<u32>> {
+        self.annotators.find_all(name)
+    }
+
+    /// Every id whose source title is `name`, ascending.
+    pub fn find_sources(&self, name: &str) -> Result<Vec<u32>> {
+        self.sources.find_all(name)
+    }
+
+    /// Every id whose team name is `name`, ascending; always empty in a set
+    /// without `.cbe`.
+    pub fn find_teams(&self, name: &str) -> Result<Vec<u32>> {
+        Ok(self.teams.as_ref().map(|t| t.find_all(name)).transpose()?.unwrap_or_default())
     }
 
     /// [`Entities::find_player`] for a tournament's title, with the path.

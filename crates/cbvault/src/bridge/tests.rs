@@ -735,3 +735,78 @@ fn the_parallel_conversion_recycles_its_chunks() {
     assert_eq!(sink.games.len(), 5000);
     assert!(sink.games.iter().all(|g| !g.keys.is_empty()));
 }
+
+/// A last name that several players share must resolve to **every** one of them.
+///
+/// This is the reason `find_players` exists at all. `find_player` answers "an
+/// id", which is a different and wrong question for a search: `.cbp` is keyed by
+/// last name, so "Kasparov" is one key with many records. A filter built from the
+/// single id `find_player` returns silently omits every other Kasparov's games,
+/// and to a user that reads as "this player has fewer games than I thought" —
+/// not as a bug, which is the worst way for one to present.
+#[test]
+fn a_shared_last_name_resolves_to_every_player_with_it() {
+    let mut builder = Builder::new();
+    let kasparov_a = builder.player("Kasparov", "Garry");
+    let kasparov_b = builder.player("Kasparov", "Garry Kasparov Jr");
+    let kasparov_c = builder.player("Kasparov", "Rustam");
+    let kamsky = builder.player("Kamsky", "Boris");
+    // A name that differs only after the shared prefix, to prove the match is on
+    // the whole field and not a prefix of it.
+    let kasparov_long = builder.player("Kasparovsky", "Someone");
+    builder.game(&[0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
+    let db = builder.write("namebase-shared");
+    let database = Database::open(db.base()).expect("open");
+
+    let found = database.entities().find_players("Kasparov").expect("find");
+    assert_eq!(
+        found,
+        vec![kasparov_a, kasparov_b, kasparov_c],
+        "every player whose last name is exactly Kasparov, ascending"
+    );
+
+    // The single-id lookup still works and is one of them — it is kept because a
+    // caller that only wants *an* id should not pay for the whole set.
+    let one = database.entities().find_player("Kasparov").expect("find one").expect("some id");
+    assert!(found.contains(&one), "find_player must agree with find_players");
+
+    // A distinct name is unaffected, and a longer name is not swept in.
+    assert_eq!(database.entities().find_players("Kamsky").expect("find"), vec![kamsky]);
+    assert_eq!(
+        database.entities().find_players("Kasparovsky").expect("find"),
+        vec![kasparov_long],
+        "a longer name must not match a shorter prefix of it"
+    );
+
+    // A name the file does not hold is empty, not an error and not id 0 — a
+    // filter built over [0] would match every game with a blank player.
+    assert!(database.entities().find_players("Nobody").expect("find").is_empty());
+    assert!(database.entities().find_players("").expect("find").is_empty());
+}
+
+/// Every entity namebase gets the same treatment, because the same bug would
+/// otherwise be waiting in the next one a consumer uses.
+#[test]
+fn every_namebase_resolves_all_of_its_matches() {
+    let mut builder = Builder::new();
+    let t_a = builder.tournament("Wijk aan Zee", "NED");
+    let t_b = builder.tournament("Wijk aan Zee", "NED");
+    builder.tournament("Hoogovens", "NED");
+    let ann_a = builder.annotator("Kasparov, Garry");
+    let ann_b = builder.annotator("Kasparov, Garry");
+    builder.annotator("Somebody Else");
+    builder.game(&[0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
+    let db = builder.write("namebase-all");
+    let database = Database::open(db.base()).expect("open");
+    let entities = database.entities();
+
+    // ChessBase reuses a tournament title across years and sites, so "all of
+    // them" is the only honest answer for a title search.
+    assert_eq!(entities.find_tournaments("Wijk aan Zee").expect("find"), vec![t_a, t_b]);
+    assert_eq!(entities.find_annotators("Kasparov, Garry").expect("find"), vec![ann_a, ann_b]);
+    assert_eq!(entities.find_tournaments("Hoogovens").expect("find").len(), 1);
+
+    // No `.cbe` in this fixture, so teams resolve to empty rather than failing.
+    assert!(entities.find_teams("Anything").expect("find").is_empty());
+    assert!(entities.find_sources("Anything").expect("find").is_empty());
+}

@@ -113,6 +113,78 @@ impl Builder {
         self.annotators.len() as u32 - 1
     }
 
+    /// Writes an entity file whose records form a **balanced tree over their name
+    /// fields**, as a real namebase does.
+    ///
+    /// The obvious encoding — every child link `-1` — writes a file that is a
+    /// single root with no descendants, and a reader that walks the tree then
+    /// finds exactly one record no matter how many exist. That is a fixture that
+    /// cannot express the case a test needs to make, so nothing ever notices.
+    /// Sorting the records by name field and linking them as a balanced tree from
+    /// that order gives a file whose descent and whose walk agree with a real
+    /// one, duplicates included.
+    ///
+    /// `name_width` is where each record's sorted key ends.
+    fn entity_file(records: &[Vec<u8>], data: usize, name_width: usize) -> Vec<u8> {
+        let key = |r: &Vec<u8>| {
+            let end = name_width.min(r.len());
+            let stop = r[..end].iter().position(|&b| b == 0).unwrap_or(end);
+            r[..stop].to_vec()
+        };
+        let mut order: Vec<usize> = (0..records.len()).collect();
+        // A stable sort, so two records with the same key keep their id order and
+        // the tree's in-order walk is ascending by id, as a real file's is.
+        order.sort_by(|&a, &b| key(&records[a]).cmp(&key(&records[b])).then(a.cmp(&b)));
+
+        // left and right per record index, -1 for none.
+        let mut left = vec![-1i32; records.len()];
+        let mut right = vec![-1i32; records.len()];
+        // Recursion over a sub-range of `order`, taking its midpoint as the root.
+        // `order` is sorted, so the result is a balanced search tree whose in-order
+        // walk is ascending — the shape and the ordering a real namebase has,
+        // which is what makes a descent and a walk agree on the same answer.
+        //
+        // Written with an explicit `(lo, hi)` walk rather than a recursive helper
+        // over two aliased `&mut` slices: the recursive version indexed the
+        // slices by `order[mid]` on the way in and by the returned node id on the
+        // way out, and the two are not the same index, so a node could be written
+        // twice and end up linked to itself.
+        let mut stack: Vec<(usize, usize)> = vec![(0, order.len())];
+        while let Some((lo, hi)) = stack.pop() {
+            if lo >= hi {
+                continue;
+            }
+            let mid = lo + (hi - lo) / 2;
+            let node = order[mid];
+            left[node] = if lo < mid { order[(lo + mid) / 2] as i32 } else { -1 };
+            right[node] = if mid + 1 < hi { order[mid + 1 + (hi - mid - 1) / 2] as i32 } else { -1 };
+            stack.push((lo, mid));
+            stack.push((mid + 1, hi));
+        }
+        let root = order.get(order.len() / 2).map_or(-1, |&i| i as i32);
+
+        let mut f = Vec::new();
+        // The header is seven 32-bit fields, and their offsets are fixed by the
+        // format: count at 0x00, **root at 0x04**, the magic at 0x08, the record
+        // data size at 0x0c, and the extra-header-bytes count at 0x18. Root being
+        // the *second* field, not the fifth, is what the reader reads; writing it
+        // anywhere else leaves the reader's root at 0, which is a valid-looking
+        // leaf — so every namebase lookup silently searched the first record and
+        // nothing noticed, because record 0 is often the right answer.
+        for v in [records.len() as i32, root, 1_234_567_890, data as i32, 0, records.len() as i32, 0] {
+            f.extend(v.to_le_bytes());
+        }
+        for (i, r) in records.iter().enumerate() {
+            f.extend(left[i].to_le_bytes());
+            f.extend(right[i].to_le_bytes());
+            f.push(0);
+            let mut d = r.clone();
+            d.resize(data, 0);
+            f.extend(d);
+        }
+        f
+    }
+
     /// Writes `db.cbh` and its companions to a new temporary directory.
     pub fn write(&self, name: &str) -> TempDb {
         let db = TempDb::create(name);
@@ -125,28 +197,14 @@ impl Builder {
         let mut cbg = self.cbg.clone();
         let size = (cbg.len() as u32).to_be_bytes();
         cbg[2..6].copy_from_slice(&size);
-        let entity = |data: usize, recs: &[Vec<u8>]| {
-            let mut f = Vec::new();
-            for v in [recs.len() as i32, 0, 1_234_567_890, data as i32, -1, recs.len() as i32, 0] {
-                f.extend(v.to_le_bytes());
-            }
-            for r in recs {
-                f.extend((-1i32).to_le_bytes());
-                f.extend((-1i32).to_le_bytes());
-                f.push(0);
-                let mut d = r.clone();
-                d.resize(data, 0);
-                f.extend(d);
-            }
-            f
-        };
+        let entity = |data: usize, recs: &[Vec<u8>], name_width: usize| Self::entity_file(recs, data, name_width);
         db.write(".cbh", &cbh);
         db.write(".cbg", &cbg);
         db.write(".cba", &self.cba);
-        db.write(".cbp", &entity(58, &self.players));
-        db.write(".cbt", &entity(90, &self.tournaments));
-        db.write(".cbc", &entity(53, &self.annotators));
-        db.write(".cbs", &entity(59, &self.sources));
+        db.write(".cbp", &entity(58, &self.players, 30));
+        db.write(".cbt", &entity(90, &self.tournaments, 40));
+        db.write(".cbc", &entity(53, &self.annotators, 45));
+        db.write(".cbs", &entity(59, &self.sources, 25));
         db
     }
 }
