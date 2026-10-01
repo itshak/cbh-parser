@@ -453,3 +453,18 @@ unobservable to a caller.
 - **THEN** the job pins the shell its steps need
 - **AND** a step fails only for a reason in the code, never for the shell it runs
   under.
+
+### Requirement: First-class PGN export on Database
+
+The `Database` façade SHALL provide high-level methods `game_pgn` and `game_pgn_with`
+that return the complete, valid PGN string for a given game ID, including tags,
+movetext, and annotations (when requested).
+
+#### Scenario: Exporting a standard game with moves
+- **WHEN** `db.game_pgn(id, &mut buf)` is called on a game with moves
+- **THEN** it returns a PGN string containing all mandatory PGN tags and the complete movetext.
+
+#### Scenario: Exporting a move-less score-only game
+- **WHEN** `db.game_pgn(id, &mut buf)` is called on a valid historical game with 0 moves
+- **THEN** it returns a valid PGN string with `[PlyCount "0"]` and the terminal game result
+- **AND** no error or panic is raised.
