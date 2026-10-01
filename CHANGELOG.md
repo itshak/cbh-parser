@@ -9,6 +9,74 @@ The project is pre-1.0.
 
 ---
 
+## [0.1.2] - 2026-09-30
+
+Search vocabulary for a raw ChessBase database, so a consumer can express the
+query its UI actually sends.
+
+### Added
+
+- **Rating ranges, and the other header predicates a search form needs.**
+  `Filter` gains `WhiteEloBetween`, `BlackEloBetween`, `EloBetween`,
+  `YearBetween`, `Result`, `Round` and `Eco`, over a `Range` type whose absent
+  end is **open** rather than zero. A threshold is not a range: "rating from
+  2800" and "rating at least 2800" are different questions, and mapping one onto
+  the other either loses the upper bound or invents one. `Range::at_least`
+  makes a threshold a special case of a range, so both answer through one
+  comparison. `Filter::eco_text("B20")` parses the text form a UI holds and
+  returns `None` for text that is not a code, so a typo can be reported rather
+  than becoming a predicate that matches nothing.
+- **`Entities::find_players` / `find_tournaments` / `find_annotators` /
+  `find_sources` / `find_teams`**, which resolve a name to **every** id it names.
+  `.cbp` is keyed by *last name*, so one key can have many records; the existing
+  `find_player` answers "an id", and a filter built from one silently omits
+  every other player's games — which reads to a user as "this player has fewer
+  games than I thought" rather than as a bug. `find_player` is kept for a caller
+  that wants only an answer.
+- **`AllOf`**, a conjunction builder, and **`any_player`**, which turns a
+  resolved id set into one filter. An empty conjunction matches every game, so
+  clearing a consumer's search form does not become a zero-result query; an
+  empty id set matches nothing, so a misspelt name does not return the whole
+  database. Those two are opposites on purpose, and both are cheap to get
+  backwards.
+- **`GameRef::plies()`** and **`has_keys()`**. The ply count is `moves.len()` and
+  the walk already knows it, so it is free. It is named because the obvious
+  shortcut is wrong: the header's `move_count()` is a `u8` capped at 255 and
+  counts *moves*, so `2 * move_count()` is wrong for any game with a set-up
+  start, and silently so.
+
+### Fixed
+
+- **The test fixtures wrote the namebase tree root at the wrong header offset,
+  and wrote no tree at all.** The reader reads the root at `0x04`, the second
+  header field; the fixture wrote it fifth. Every fixture namebase therefore had
+  a root of the literal `0` — a valid-looking leaf — so a namebase lookup searched
+  record 0 and returned a plausible answer. Nothing noticed, because record 0 is
+  often the right one. Separately, every child link was `-1`, so the tree was a
+  single node and a reader walking it found one record however many existed. The
+  tree-descent path was therefore never exercised by a fixture. Fixtures now
+  write a balanced tree over the name fields, and the root lands at the offset
+  the reader reads.
+- **`find_all` — the new multi-id lookup — did not terminate.** The tidy
+  three-push in-order walk re-pushes each node, which puts its left child on the
+  stack a second time and that child's left child on again; a seven-record
+  fixture spent its whole budget popping one leaf and returned a single id. It is
+  a pre-order walk with a `seen` set, which is also correct on a damaged tree
+  rather than merely bounded.
+
+### Not changed
+
+- **No new traversal.** The plan assumed this release would add a key-emitting
+  walk with pluggable sinks. It does not need to: `GameSink` already receives a
+  `GameRef` carrying the record number, the `moves2` main line and one Polyglot
+  key per position, driven by `for_each_game` and `convert_parallel`, with
+  `wants_keys` as the make-selection contract ADR-003 moved up a level. A
+  consumer's index build, opening tree and position search become three sinks on
+  one existing walk.
+- **Additive API only.** No existing item changed behaviour or signature, and
+  nothing here decodes a move differently, so the byte-equality gates
+  (ADR-002, ADR-003) are untouched.
+
 ## [0.1.1] - 2026-09-30
 
 A build fix, and a CI change that is the more important half of it.

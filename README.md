@@ -394,16 +394,28 @@ hands a sink for the same id, so a game view and a conversion cannot disagree.
 
 ### Tag search
 
-A name resolves to one entity id, once; the scan then compares that id per record.
+A name resolves to **every** entity id it names, once; the scan then compares those
+ids per record. `.cbp` is keyed by **last name**, so one key can have many records —
+`find_players` is the right call for a search, and `find_player` (which returns one
+id) is for a caller that only wants an answer.
 
 ```rust
-use cbvault::bridge::{self, Database, Filter};
+use cbvault::bridge::{self, AllOf, Database, Filter, Range};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let db = Database::open("Mega Database 2025/Mega Database 2025")?;
 
-    let id = db.entities().find_player("Kasparov")?.expect("no such player");
-    let found = bridge::scan(&db, &Filter::player(id), 10)?;
+    let ids = db.entities().find_players("Kasparov")?;
+
+    // White is a Kasparov, rated at least 2800, played in or after 2010.
+    // Every criterion narrows the others; an absent bound is open, not zero.
+    let filter = AllOf::new()
+        .and(bridge::any_player(&ids))
+        .and(Filter::WhiteEloBetween(Range::at_least(2800)))
+        .and(Filter::YearBetween(Range { from: Some(2010), to: None }))
+        .filter();
+
+    let found = bridge::scan(&db, &filter, 10)?;
 
     for m in found.matches() {
         println!("{} {} - {}", m.id, m.white.as_str().unwrap_or("?"), m.black.as_str().unwrap_or("?"));
@@ -412,6 +424,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 ```
+
+Also available: `WhiteEloBetween` / `BlackEloBetween` / `EloBetween`, `YearBetween`,
+`Result`, `Round` and `Eco` — all comparisons of fields the 46-byte header already
+holds, so none of them opens the moves file. `Filter::eco_text("B20")` parses the
+text form a UI actually holds, and returns `None` for text that is not a code, so a
+typo can be reported rather than becoming a predicate that matches nothing.
+
+`GameRef::plies()` gives a game's exact ply count from the move stream the walk has
+already read. Do **not** derive it from the header: `move_count()` is a `u8` capped
+at 255 and counts *moves*, so `2 * move_count()` is wrong for any game with a set-up
+start — silently.
 
 The same predicate over the same range yields the same set at any thread count.
 Note that ChessBase's tournament namebase is **not** a valid binary search tree,
