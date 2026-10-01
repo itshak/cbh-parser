@@ -43,7 +43,7 @@ checksum = "37b2a672a2cb129a2e41c10b1224bb368f9f37a2b16b612598138befd7b37eb5"
 
 [[package]]
 name = "cbvault"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "cbvault-chess",
  "cbvault-fixtures",
@@ -55,7 +55,7 @@ dependencies = [
 
 [[package]]
 name = "cbvault-chess"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "cbvault-fixtures",
  "cbvault-format",
@@ -64,7 +64,7 @@ dependencies = [
 
 [[package]]
 name = "cbvault-cli"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "cbvault",
  "cbvault-chess",
@@ -74,7 +74,7 @@ dependencies = [
 
 [[package]]
 name = "cbvault-fixtures"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "cbvault-format",
  "gigachess",
@@ -82,7 +82,7 @@ dependencies = [
 
 [[package]]
 name = "cbvault-format"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "cbvault-fixtures",
  "memmap2",

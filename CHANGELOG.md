@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 The project is pre-1.0.
 
+## [0.1.3] - 2026-10-01
+ 
+Direct PGN extraction on Database façade, high-performance binary-search multi-player filtering (`Filter::PlayerSet`), and 0-ply score-only game contract.
+ 
+### Added
+ 
+- **`Database::game_pgn` & `Database::game_pgn_with`**, generating complete, valid PGN strings (Seven-Tag Roster, optional event/site/eco/round metadata, and formatted move text) directly from raw `.cbh` and `.cbg` bytes without requiring consumer-side move re-encoding.
+- **`Filter::PlayerSet(IdSet)`**, providing zero-allocation $O(\log K)$ binary-search matching over sorted candidate player IDs for multi-name queries.
+- **Score-only (0-ply) game contract**, ensuring games without move bytes (e.g. historical games like Staunton–Hughes 1858) emit valid PGN headers with `[PlyCount "0"]` matching official ChessBase export behavior instead of silently skipping them.
+ 
 ---
 
 ## [0.1.2] - 2026-09-30
