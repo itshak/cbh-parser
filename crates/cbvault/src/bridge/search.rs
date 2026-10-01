@@ -19,7 +19,7 @@
 
 use cbvault_format::cbh::{Entity, GameHeader};
 use cbvault_format::error::{Error, Result};
-use cbvault_format::game::RecordKind;
+use cbvault_format::game::{Eco, GameResult, RecordKind};
 use rayon::prelude::*;
 
 use super::namebase::Name;
@@ -72,6 +72,64 @@ impl FromIterator<u32> for IdSet {
     }
 }
 
+/// A closed numeric range, either end of which may be open.
+///
+/// One type rather than a pair of `Option<i32>`s in every variant, because the
+/// semantics are worth naming once: `None` is an **open** end, not a zero bound.
+/// A consumer that sends "rating from 2800" sends `Some(2800), None` and must not
+/// have it silently become "0 to 2800" — which would return every unrated game in
+/// the database.
+///
+/// This is also what lets a threshold be a special case rather than a second
+/// variant: [`Range::at_least`] is `Some(min), None`, so
+/// [`Filter::WhiteEloAtLeast`] and [`Filter::WhiteEloBetween`] answer the same
+/// question through one comparison and one code path to test.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Range {
+    /// The inclusive lower bound; `None` is unbounded below.
+    pub from: Option<i32>,
+    /// The inclusive upper bound; `None` is unbounded above.
+    pub to: Option<i32>,
+}
+
+impl Range {
+    /// A range with both ends closed.
+    pub fn new(from: i32, to: i32) -> Range {
+        Range { from: Some(from), to: Some(to) }
+    }
+
+    /// A range unbounded above, which is what "at least `min`" means.
+    pub fn at_least(min: i32) -> Range {
+        Range { from: Some(min), to: None }
+    }
+
+    /// A range unbounded below.
+    pub fn at_most(max: i32) -> Range {
+        Range { from: None, to: Some(max) }
+    }
+
+    /// Whether `value` is within the range.
+    ///
+    /// An inverted range — `from` above `to` — matches nothing rather than
+    /// everything. Both bounds cannot be `None` in practice (that would be
+    /// `Filter::All` in a slower form), and an unbounded value is tested against
+    /// the bounds that exist.
+    #[inline]
+    pub fn contains(&self, value: i32) -> bool {
+        if let Some(from) = self.from
+            && value < from
+        {
+            return false;
+        }
+        if let Some(to) = self.to
+            && value > to
+        {
+            return false;
+        }
+        self.from.is_some() || self.to.is_some()
+    }
+}
+
 /// A predicate over one header record, in its resolved form.
 ///
 /// Every variant is a comparison of a field the record already holds, so the
@@ -91,6 +149,44 @@ pub enum Filter {
     BlackEloAtLeast(i32),
     /// Games where either rating is at least this.
     EloAtLeast(i32),
+    /// Games whose white player's rating is in the range. `None` is an open end.
+    WhiteEloBetween(Range),
+    /// Games whose black player's rating is in the range. `None` is an open end.
+    BlackEloBetween(Range),
+    /// Games where *either* rating is in the range. `None` is an open end.
+    EloBetween(Range),
+    /// Games played within the range, by year. `None` is an open end.
+    ///
+    /// Compared on the year alone. The header's date is a packed day/month/year
+    /// and a month/day that a consumer would compare against is almost always a
+    /// whole-year range; a caller needing exact dates can read [`GameHeader`]
+    /// itself. A game with no date (year 0) is never in range, because
+    /// "unknown" is not "in the range the user asked for".
+    YearBetween(Range),
+    /// Games with this result.
+    Result(GameResult),
+    /// Games in this round number, or this sub-round when `sub` is `Some`.
+    ///
+    /// `sub` of `None` is "any sub-round" rather than an open range — the field
+    /// is one byte and is not numeric in the way ratings are, so a half-open
+    /// range over it would be a guess.
+    Round {
+        /// The round number, as the header stores it.
+        round: u8,
+        /// The sub-round, when the caller distinguishes one.
+        sub: Option<u8>,
+    },
+    /// Games whose ECO code is in `0..=499` (A00–E99) with this sub-code.
+    ///
+    /// `sub` of `None` matches every sub-code of the opening, which is what
+    /// "all of B20" means. A game with no code, a Chess960 start or an
+    /// unrecognised value does not match.
+    Eco {
+        /// The opening code, `0..=499` for A00–E99.
+        code: u16,
+        /// The sub-code within the opening, when the caller distinguishes one.
+        sub: Option<u8>,
+    },
     // There is deliberately no "starts from a set-up position" filter: the
     // classic header does not record it — the bit is in the move record's
     // flags — and a tag search over a raw database does not open the moves
@@ -125,6 +221,20 @@ impl Filter {
         Filter::Either(id)
     }
 
+    /// Games whose ECO code is the `code` part of a text like `"B20"`, with every
+    /// sub-code matching.
+    ///
+    /// The text form is what every consumer's UI actually holds — BlindBase's
+    /// own `SearchCriteria` passes `"B20"` — and turning it into a predicate here
+    /// means no consumer writes a second conversion of the same three characters.
+    /// Case-insensitive, and tolerant of surrounding space. `None` for text that
+    /// is not an ECO code, so a caller can report the typo instead of building a
+    /// filter that matches nothing and looking like an empty database.
+    pub fn eco_text(text: &str) -> Option<Filter> {
+        let (code, sub) = parse_eco(text)?;
+        Some(Filter::Eco { code, sub })
+    }
+
     /// Both predicates must hold.
     pub fn and(self, other: Filter) -> Filter {
         Filter::AllOf(Box::new(self), Box::new(other))
@@ -148,6 +258,18 @@ impl Filter {
             Filter::WhiteEloAtLeast(min) => i32::from(header.white_elo()) >= *min,
             Filter::BlackEloAtLeast(min) => i32::from(header.black_elo()) >= *min,
             Filter::EloAtLeast(min) => i32::from(header.white_elo()) >= *min || i32::from(header.black_elo()) >= *min,
+            Filter::WhiteEloBetween(range) => range.contains(i32::from(header.white_elo())),
+            Filter::BlackEloBetween(range) => range.contains(i32::from(header.black_elo())),
+            Filter::EloBetween(range) => {
+                range.contains(i32::from(header.white_elo())) || range.contains(i32::from(header.black_elo()))
+            }
+            Filter::YearBetween(range) => range.contains(i32::from(header.played_date().year())),
+            Filter::Result(want) => header.result() == *want,
+            Filter::Round { round, sub } => header.round() == *round && sub.is_none_or(|s| header.subround() == s),
+            Filter::Eco { code, sub } => match header.eco() {
+                Eco::Code { code: c, sub: s } => c == *code && sub.is_none_or(|w| s == w),
+                _ => false,
+            },
             Filter::Player(id) => header.white() == *id,
             Filter::Opponent(id) => header.black() == *id,
             Filter::Either(id) => header.white() == *id || header.black() == *id,
@@ -159,6 +281,46 @@ impl Filter {
             Filter::AnyOf(a, b) => a.matches(id, header) || b.matches(id, header),
             Filter::Not(inner) => !inner.matches(id, header),
         }
+    }
+}
+
+/// A text ECO code as the header stores it: the `0..=499` code and the sub-code.
+///
+/// `"B20"` is code 120, sub 0 — the code is the letter's hundred plus the number
+/// after it. A bare letter — `"B"` — is code 100 with no sub-code, which is what
+/// "all of the B openings" means. Anything else is `None`.
+fn parse_eco(text: &str) -> Option<(u16, Option<u8>)> {
+    let text = text.trim().as_bytes();
+    let letter = u16::from(match text.first()? {
+        b'A'..=b'E' => text[0] - b'A',
+        b'a'..=b'e' => text[0] - b'a',
+        _ => return None,
+    });
+    let digits = &text[1..];
+    // A bare letter is legal, so the empty case is not rejected here; only a
+    // fourth digit or a non-digit is.
+    if digits.len() > 3 || !digits.iter().all(u8::is_ascii_digit) {
+        return None;
+    }
+    let number: u16 = std::str::from_utf8(digits).ok()?.parse().unwrap_or(0);
+    // The code is the letter's hundred plus the number written after it, read as
+    // the digits *are* the code's last two places — "A01" is code 1 and "B20"
+    // is code 120. Reading the whole remainder as one number is what makes that
+    // work, and it is why this cannot be split on length the way it looks like
+    // it should: "A1" and "A01" are the same code, and only one of them is what
+    // a PGN writes.
+    let code = letter * 100 + number;
+    if code > 499 {
+        return None;
+    }
+    match digits.len() {
+        // A bare letter is the whole hundred: every sub-code matches.
+        0 => Some((code, None)),
+        // Two digits is the code with sub-code 0 — the PGN's own form.
+        2 => Some((code, Some(0))),
+        // Three digits carry the sub-code in the last place.
+        3 => Some((code, Some(digits[2] - b'0'))),
+        _ => None,
     }
 }
 
@@ -523,4 +685,70 @@ pub fn for_each_position_key_range(
         }
     }
     Ok(total)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The ECO text parser must be the exact inverse of `Eco::code_text`, or a
+    /// search for "B20" silently returns the wrong games.
+    ///
+    /// Every code in every hundred is checked, not a sample: the mapping is
+    /// arithmetic in three places and one of them being wrong costs a user the
+    /// difference between "500 wrong results" and "every B opening".
+    #[test]
+    fn eco_text_round_trips_every_code() {
+        for code in 0..=499u16 {
+            let text = Eco::Code { code, sub: 0 }.code_text().unwrap();
+            let text = std::str::from_utf8(&text).unwrap();
+            assert_eq!(parse_eco(text), Some((code, Some(0))), "{text} must parse back to code {code}");
+            // And with a non-zero sub-code, which is how most games are stored.
+            for sub in [1u8, 7, 42, 127] {
+                let field = Eco::Code { code, sub }.field();
+                let back = Eco::from_field(field);
+                assert_eq!(back, Eco::Code { code, sub }, "code {code} sub {sub} must survive the field round trip");
+            }
+        }
+    }
+
+    #[test]
+    fn eco_text_rejects_what_is_not_a_code() {
+        for bad in ["", " ", "F20", "B20X", "20", "B999", "B2O", "b2O", "Z"] {
+            assert_eq!(parse_eco(bad), None, "{bad:?} is not an ECO code");
+        }
+    }
+
+    #[test]
+    fn a_bare_letter_covers_the_whole_hundred() {
+        assert_eq!(parse_eco("B"), Some((100, None)));
+        assert_eq!(parse_eco("E"), Some((400, None)));
+        assert_eq!(parse_eco("b"), Some((100, None)));
+        // Out of the five-letter range.
+        assert_eq!(parse_eco("F"), None);
+    }
+
+    #[test]
+    fn range_treats_none_as_open_not_zero() {
+        // The bug this guards: "from 2800" becoming 0..2800 and returning every
+        // unrated game in the database.
+        assert!(Range::at_least(2800).contains(2800));
+        assert!(Range::at_least(2800).contains(4000));
+        assert!(!Range::at_least(2800).contains(0));
+        assert!(!Range::at_least(2800).contains(2799));
+
+        assert!(Range::new(2000, 2010).contains(2000));
+        assert!(Range::new(2000, 2010).contains(2010));
+        assert!(!Range::new(2000, 2010).contains(2011));
+        assert!(!Range::new(2000, 2010).contains(1999));
+
+        assert!(Range::at_most(1500).contains(0));
+        assert!(!Range::at_most(1500).contains(1501));
+
+        // An unbounded range matches nothing rather than everything: it is not
+        // Filter::All in disguise, it is a query with no constraint.
+        assert!(!Range { from: None, to: None }.contains(0));
+        // Inverted ranges match nothing.
+        assert!(!Range::new(2010, 2000).contains(2005));
+    }
 }
