@@ -29,6 +29,10 @@
 
 mod comments;
 
+/// The PGN text splitter: blank line outside a comment plus a tag line next.
+pub mod split;
+pub use split::{split_game_ranges, split_games};
+
 /// The parallel export pipeline (Rayon, record-ordered output).
 pub mod parallel;
 pub use parallel::{

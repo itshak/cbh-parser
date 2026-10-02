@@ -40,6 +40,12 @@ use super::walk::{self, GameBuf, game_ref};
 use super::{Database, GameSink};
 
 /// What a conversion delivered.
+///
+/// `complete` is `true` unless the walk stopped early at the sink's
+/// [`GameSink::cancelled`]: a cancelled run's games are a prefix of the
+/// answer, never the whole of it, and this is what says so — the same
+/// contract [`PositionSearch::complete`](super::PositionSearch::complete)
+/// keeps for the position replay.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct ConvertStats {
     /// Records walked.
@@ -56,6 +62,8 @@ pub struct ConvertStats {
     /// Games the walk could not decode, each also reported to
     /// [`GameSink::failed`].
     pub failures: u64,
+    /// Whether the walk ran to the end. `false` after a cancel.
+    pub complete: bool,
 }
 
 /// The `.cbg` record at `at`, borrowed from the memory map where the file is
@@ -174,13 +182,17 @@ pub fn for_each_game(db: &Database, sink: &mut impl GameSink) -> Result<ConvertS
 /// convert part of a set — a range it has already decided it wants, or the slice
 /// a benchmark measures.
 pub fn for_each_range(db: &Database, first: u32, last: u32, sink: &mut impl GameSink) -> Result<ConvertStats> {
-    let mut stats = ConvertStats::default();
+    let mut stats = ConvertStats { complete: true, ..ConvertStats::default() };
     let mut walker = Walker::new(db, sink);
     for_each_record(db, first, last.min(db.records()), sink, &mut walker, &mut stats)?;
     Ok(stats)
 }
 
 /// Walks every record of `db` in id order, handing games to `walker`.
+///
+/// Cooperative cancellation: `sink.cancelled()` is asked before each record,
+/// and a `true` answer stops the walk with the stats gathered so far and
+/// `complete: false`. One predictable branch per record, outside the decode.
 fn for_each_record(
     db: &Database,
     first: u32,
@@ -190,6 +202,10 @@ fn for_each_record(
     stats: &mut ConvertStats,
 ) -> Result<()> {
     for id in first..=last {
+        if sink.cancelled() {
+            stats.complete = false;
+            return Ok(());
+        }
         stats.records += 1;
         let header = match db.header_ref(id) {
             Ok(header) => header,
@@ -471,7 +487,7 @@ pub fn convert_parallel(db: &Database, sink: &mut impl GameSink, threads: usize,
         db,
         buf: GameBuf::with_capacity(walk::DEFAULT_PLY_ROOM),
         scratch: Vec::new(),
-        stats: ConvertStats::default(),
+        stats: ConvertStats { complete: true, ..ConvertStats::default() },
     };
 
     // One pool for the run, installed per wave: building it per wave paid pool
@@ -481,6 +497,13 @@ pub fn convert_parallel(db: &Database, sink: &mut impl GameSink, threads: usize,
         .build()
         .map_err(|e| Error::corrupt(db.base(), 0, format!("thread pool creation failed: {e}")))?;
     for wave in ranges.chunks(pool.len().max(1)) {
+        // Cancellation is checked per wave, before delivery: the wave's chunks
+        // are already decoded (bounded by `threads × batch` records), but the
+        // sink sees nothing further and the stats say `complete: false`.
+        if sink.cancelled() {
+            writer.stats.complete = false;
+            return Ok(writer.stats);
+        }
         let jobs: Vec<(&mut Chunk, (u32, u32))> = pool.iter_mut().zip(wave.iter().copied()).collect();
         pool_threads.install(|| {
             jobs.into_par_iter().for_each(|(chunk, (first, last))| {

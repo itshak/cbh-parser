@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 The project is pre-1.0.
 
+## [0.1.4] - 2026-10-02
+
+Cooperative walk cancellation and one PGN game splitter, both driven by the
+BlindBase live-set position search: a 50-game answer over an 11M-game set no
+longer costs a full decode.
+
+### Added
+
+- **`GameSink::cancelled`** (default `false`), polled per record by
+  `for_each_game` / `for_each_range` and per wave by `convert_parallel`.
+  A cancelled run returns its prefix stats with `ConvertStats::complete = false`,
+  mirroring `PositionSearch::complete` — a prefix is never mistaken for a whole answer.
+- **`cbvault::pgn::split`** (`split_games`, `split_game_ranges`): the one
+  boundary rule (blank line outside a comment whose next non-blank line is a
+  tag pair), byte-based with lossy UTF-8, ported from BlindBase with its test
+  vectors. The rule has one owner now so both sides of the bridge split the
+  same bytes the same way.
+
+---
+
 ## [0.1.3] - 2026-10-01
  
 Direct PGN extraction on Database façade, high-performance binary-search multi-player filtering (`Filter::PlayerSet`), and 0-ply score-only game contract.

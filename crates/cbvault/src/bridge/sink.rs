@@ -87,6 +87,15 @@ pub trait GameSink {
         false
     }
 
+    /// Whether the walk should stop early. Polled, not pushed: the sequential
+    /// walk asks before each record, the parallel walk before each wave, and a
+    /// `true` answer ends the run with the stats gathered so far and
+    /// `complete: false`. `false` (the default) walks to the last record,
+    /// which is today's behaviour for every existing sink.
+    fn cancelled(&self) -> bool {
+        false
+    }
+
     /// Whether the `.cba` record of each game should be read and parsed into
     /// [`GameRef::annotations`]. `false` (the default) does not open the file
     /// at all — 209 MB on the reference database.

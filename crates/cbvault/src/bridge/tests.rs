@@ -782,6 +782,84 @@ fn the_parallel_conversion_recycles_its_chunks() {
     assert!(sink.games.iter().all(|g| !g.keys.is_empty()));
 }
 
+/// A sink that stops after `stop_after` games: the shape a live-set position
+/// search takes when it has its answer and wants no further decode.
+#[derive(Default)]
+struct CancelAfter {
+    stop_after: usize,
+    games: Vec<u32>,
+}
+
+impl GameSink for CancelAfter {
+    fn game(&mut self, game: GameRef<'_>) {
+        self.games.push(game.id);
+    }
+
+    fn cancelled(&self) -> bool {
+        self.games.len() >= self.stop_after
+    }
+}
+
+#[test]
+fn a_cancelled_sequential_walk_returns_its_prefix_marked_incomplete() {
+    let games = 200usize;
+    let db = fixture("bridge-cancel-seq", games);
+    let database = Database::open(db.base()).expect("open");
+    let mut sink = CancelAfter { stop_after: 50, ..CancelAfter::default() };
+    let stats = for_each_game(&database, &mut sink).expect("the cancelled walk");
+    assert_eq!(sink.games.len(), 50, "the walk stops at the signal");
+    assert_eq!(sink.games, (1..=50).collect::<Vec<u32>>(), "a prefix in game-number order, never a sample");
+    assert_eq!(stats.games, 50);
+    assert!(!stats.complete, "a prefix must not read as a whole answer");
+}
+
+#[test]
+fn an_immediate_cancel_delivers_nothing_and_still_says_so() {
+    let db = fixture("bridge-cancel-now", 64);
+    let database = Database::open(db.base()).expect("open");
+    let mut sink = CancelAfter::default();
+    let stats = for_each_game(&database, &mut sink).expect("the cancelled walk");
+    assert!(sink.games.is_empty());
+    assert_eq!(stats.games, 0);
+    assert!(!stats.complete);
+}
+
+#[test]
+fn a_cancelled_parallel_walk_returns_its_prefix_in_order() {
+    let games = 4096usize;
+    let db = fixture("bridge-cancel-par", games);
+    let database = Database::open(db.base()).expect("open");
+    let mut sink = CancelAfter { stop_after: 100, ..CancelAfter::default() };
+    let stats = convert_parallel(&database, &mut sink, 4, 64).expect("the cancelled walk");
+    // The parallel walk is checked per wave, so the sink may see the wave in
+    // flight past the signal — bounded by one wave, still a prefix, still ordered.
+    assert!(
+        (100..=(100 + 4 * 64)).contains(&sink.games.len()),
+        "bounded overshoot past the signal, got {}",
+        sink.games.len()
+    );
+    let mut ordered = sink.games.clone();
+    ordered.sort_unstable();
+    assert_eq!(sink.games, ordered, "game-number order is kept on cancel");
+    assert_eq!(stats.games as usize, sink.games.len());
+    assert!(!stats.complete);
+}
+
+#[test]
+fn no_signal_walks_to_the_end_marked_complete() {
+    let games = 256usize;
+    let db = fixture("bridge-cancel-none", games);
+    let database = Database::open(db.base()).expect("open");
+    let mut sink = Recorder::default();
+    let stats = for_each_game(&database, &mut sink).expect("the walk");
+    assert_eq!(stats.games, games as u64);
+    assert!(stats.complete);
+    let mut sink = Recorder::default();
+    let stats = convert_parallel(&database, &mut sink, 4, 64).expect("the walk");
+    assert_eq!(stats.games, games as u64);
+    assert!(stats.complete);
+}
+
 /// A last name that several players share must resolve to **every** one of them.
 ///
 /// This is the reason `find_players` exists at all. `find_player` answers "an
